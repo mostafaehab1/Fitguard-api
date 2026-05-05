@@ -29,7 +29,10 @@ export async function getProfile(req, res, next) {
     if (!user) {
       throw new AppError("User not found", { statusCode: 404, code: "NOT_FOUND" });
     }
-    res.json({ profile: user.profile ?? {} });
+    res.json({
+      role: user.role === "trainer" ? "coach" : user.role,
+      profile: user.profile ?? {},
+    });
   } catch (err) {
     next(err);
   }
@@ -112,7 +115,10 @@ export async function updateProfile(req, res, next) {
     user.profile = { ...user.profile, ...updates };
 
     await user.save();
-    res.json({ profile: user.profile });
+    res.json({
+      role: user.role === "trainer" ? "coach" : user.role,
+      profile: user.profile,
+    });
   } catch (err) {
     next(err);
   }

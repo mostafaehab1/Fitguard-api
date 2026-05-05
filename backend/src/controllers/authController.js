@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import {
   ACTIVITY_LEVELS,
@@ -18,9 +19,8 @@ function normalizeEmail(email) {
 
 function normalizeRole(role) {
   const r = String(role ?? "user").toLowerCase();
-  if (r === "trainer") return "trainer";
-  if (r === "admin") {
-    throw new AppError("Cannot self-register as admin", {
+  if (r === "admin" || r === "trainer") {
+    throw new AppError("Cannot self-register with elevated role", {
       statusCode: 403,
       code: "FORBIDDEN_ROLE",
     });
@@ -32,7 +32,7 @@ function publicUser(doc) {
   return {
     id: doc.id,
     email: doc.email,
-    role: doc.role,
+    role: doc.role === "trainer" ? "coach" : doc.role,
     profile: doc.profile
       ? {
           name: doc.profile.name ?? null,
@@ -149,7 +149,13 @@ export async function register(req, res, next) {
       profile: normalizedProfile,
     });
 
-    res.status(201).json({ user: publicUser(doc) });
+    const emailVerificationToken = crypto.randomBytes(32).toString("hex");
+    await User.findByIdAndUpdate(doc.id, { emailVerificationToken });
+
+    res.status(201).json({
+      user: publicUser(doc),
+      ...(env.nodeEnv !== "production" ? { devEmailVerificationToken: emailVerificationToken } : {}),
+    });
   } catch (err) {
     next(err);
   }
@@ -194,23 +200,95 @@ export async function login(req, res, next) {
   }
 }
 
-export async function me(req, res, next) {
+export async function forgotPassword(req, res, next) {
   try {
-    if (!req.auth?.userId) {
-      throw new AppError("Unauthorized", { statusCode: 401, code: "UNAUTHORIZED" });
+    const { email } = req.body ?? {};
+    const em = normalizeEmail(email);
+    if (!em) {
+      throw new AppError("Email is required", { code: "VALIDATION_ERROR" });
     }
 
-    const doc = await User.findById(req.auth.userId);
-    if (!doc) {
-      throw new AppError("User not found", { statusCode: 404, code: "NOT_FOUND" });
+    const user = await User.findOne({ email: em });
+    if (!user) {
+      res.json({ message: "If that email exists, a reset link has been sent." });
+      return;
     }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const userWithToken = await User.findById(user.id).select("+resetToken +resetTokenExpiresAt");
+    userWithToken.resetToken = token;
+    userWithToken.resetTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await userWithToken.save();
 
     res.json({
-      user: {
-        ...publicUser(doc),
-        emailVerifiedAt: doc.emailVerifiedAt,
-      },
+      message: "If that email exists, a reset link has been sent.",
+      ...(env.nodeEnv !== "production" ? { devToken: token } : {}),
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPassword(req, res, next) {
+  try {
+    const { token, newPassword } = req.body ?? {};
+    if (!token || !newPassword || String(newPassword).length < 8) {
+      throw new AppError("token and newPassword (min 8 chars) are required", {
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    const user = await User.findOne({
+      resetToken: token,
+      resetTokenExpiresAt: { $gt: new Date() },
+    }).select("+resetToken +resetTokenExpiresAt +passwordHash");
+
+    if (!user) {
+      throw new AppError("Invalid or expired reset token", {
+        statusCode: 400,
+        code: "INVALID_RESET_TOKEN",
+      });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    user.resetToken = null;
+    user.resetTokenExpiresAt = null;
+    await user.save();
+
+    res.json({ message: "Password reset successful." });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function verifyEmail(req, res, next) {
+  try {
+    const token = String(req.query.token ?? "").trim();
+    if (!token) {
+      throw new AppError("Verification token is required", {
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    const user = await User.findOne({ emailVerificationToken: token }).select(
+      "+emailVerificationToken"
+    );
+    if (!user) {
+      throw new AppError("Invalid verification token", {
+        statusCode: 400,
+        code: "INVALID_TOKEN",
+      });
+    }
+    if (user.emailVerifiedAt) {
+      res.json({ message: "Email already verified." });
+      return;
+    }
+
+    user.emailVerifiedAt = new Date();
+    user.emailVerificationToken = null;
+    await user.save();
+    res.json({ message: "Email verified successfully." });
   } catch (err) {
     next(err);
   }

@@ -9,7 +9,7 @@ function toPublicUser(user) {
   return {
     id: user.id,
     email: user.email,
-    role: user.role,
+    role: user.role === "trainer" ? "coach" : user.role,
     profile: user.profile,
     createdAt: user.createdAt,
   };
@@ -52,10 +52,11 @@ export async function listUsers(req, res, next) {
 
     const query = {};
     if (role) {
-      if (!ROLES.includes(role)) {
+      const internalRole = role === "coach" ? "trainer" : role;
+      if (!ROLES.includes(internalRole)) {
         throw new AppError("Invalid role filter", { code: "VALIDATION_ERROR" });
       }
-      query.role = role;
+      query.role = internalRole;
     }
     if (search) {
       query.email = { $regex: search, $options: "i" };
@@ -90,8 +91,9 @@ export async function getUserById(req, res, next) {
 export async function updateUserRole(req, res, next) {
   try {
     const { role } = req.body ?? {};
-    if (!ROLES.includes(role)) {
-      throw new AppError(`role must be one of: ${ROLES.join(", ")}`, {
+    const internalRole = role === "coach" ? "trainer" : role;
+    if (!ROLES.includes(internalRole)) {
+      throw new AppError("role must be one of: user, coach, admin", {
         code: "VALIDATION_ERROR",
       });
     }
@@ -99,7 +101,13 @@ export async function updateUserRole(req, res, next) {
     if (!user) {
       throw new AppError("User not found", { statusCode: 404, code: "NOT_FOUND" });
     }
-    user.role = role;
+    if (String(user.id) === String(req.auth.userId)) {
+      throw new AppError("Cannot change your own role", {
+        statusCode: 400,
+        code: "SELF_ROLE_CHANGE",
+      });
+    }
+    user.role = internalRole;
     await user.save();
     res.json({ user: toPublicUser(user) });
   } catch (err) {

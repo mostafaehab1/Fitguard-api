@@ -23,6 +23,16 @@ export async function assignPlanToSubscribedUser(req, res, next) {
     if (!userId) {
       throw new AppError("userId is required", { code: "VALIDATION_ERROR" });
     }
+    if (!Array.isArray(workoutPlan) || workoutPlan.length === 0) {
+      throw new AppError("workoutPlan must be a non-empty array of strings", {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    if (nutritionPlan !== undefined && !Array.isArray(nutritionPlan)) {
+      throw new AppError("nutritionPlan must be an array of strings", {
+        code: "VALIDATION_ERROR",
+      });
+    }
     await requireCoachSubscription(userId, req.auth.userId);
 
     await PlanAssignment.updateMany(

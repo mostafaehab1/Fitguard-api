@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 export const ROLES = ["user", "trainer", "admin"];
+// Public API alias: expose "trainer" as "coach" in responses.
 export const GENDERS = ["Male", "Female"];
 export const GOALS = ["Muscle Building", "Weight Loss", "Maintain"];
 export const ACTIVITY_LEVELS = [
@@ -50,6 +51,9 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ROLES, default: "user" },
     profile: { type: ProfileSchema, default: () => ({}) },
     emailVerifiedAt: { type: Date, default: null },
+    resetToken: { type: String, default: null, select: false },
+    resetTokenExpiresAt: { type: Date, default: null, select: false },
+    emailVerificationToken: { type: String, default: null, select: false },
   },
   { timestamps: true }
 );

@@ -6,7 +6,7 @@ export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "FitGuard API",
-    version: "0.3.0",
+    version: "0.4.0",
     description: "Production-style backend contract for FitGuard. Base path: `/api`.",
   },
   servers: [{ url: "/", description: "This server" }],
@@ -43,7 +43,7 @@ export const openApiSpec = {
         properties: {
           id: { type: "string" },
           email: { type: "string", format: "email" },
-          role: { type: "string", enum: ["user", "trainer", "admin"] },
+          role: { type: "string", enum: ["user", "coach", "admin"] },
           profile: { $ref: "#/components/schemas/UserProfile" },
           emailVerifiedAt: { type: "string", format: "date-time", nullable: true },
         },
@@ -90,7 +90,12 @@ export const openApiSpec = {
         properties: {
           email: { type: "string", format: "email" },
           password: { type: "string", format: "password", minLength: 8 },
-          role: { type: "string", enum: ["user", "trainer"], default: "user" },
+          role: {
+            type: "string",
+            enum: ["user"],
+            default: "user",
+            description: "Always resolves to user. Cannot self-register as trainer or admin.",
+          },
           profile: { $ref: "#/components/schemas/UserProfile" },
         },
       },
@@ -160,7 +165,87 @@ export const openApiSpec = {
         type: "object",
         required: ["role"],
         properties: {
-          role: { type: "string", enum: ["user", "trainer", "admin"] },
+          role: { type: "string", enum: ["user", "coach", "admin"] },
+        },
+      },
+      CoachProfile: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          email: { type: "string", format: "email" },
+          name: { type: "string", nullable: true },
+          bio: { type: "string", nullable: true, maxLength: 500 },
+          specialties: { type: "array", items: { type: "string" } },
+          memberSince: { type: "string", format: "date-time" },
+        },
+      },
+      WorkoutSessionDetail: {
+        type: "object",
+        properties: {
+          _id: { type: "string" },
+          userId: { type: "string" },
+          exerciseId: {
+            type: "object",
+            properties: {
+              _id: { type: "string" },
+              name: { type: "string" },
+              type: { type: "string", enum: ["tracked", "guided"] },
+              instructions: { type: "string" },
+            },
+          },
+          tracked: { type: "boolean" },
+          totalReps: { type: "integer" },
+          correctReps: { type: "integer" },
+          wrongReps: { type: "integer" },
+          mistakes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                type: { type: "string" },
+                count: { type: "integer", minimum: 1 },
+              },
+            },
+          },
+          sessionAt: { type: "string", format: "date-time" },
+        },
+      },
+      AssignPlanBody: {
+        type: "object",
+        required: ["userId", "workoutPlan"],
+        properties: {
+          userId: {
+            type: "string",
+            description: "ObjectId of the subscribed user to assign the plan to",
+          },
+          workoutPlan: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            example: ["3x10 squats", "3x12 push-ups", "30 min cardio"],
+          },
+          nutritionPlan: {
+            type: "array",
+            items: { type: "string" },
+            example: ["2500 kcal/day", "150g protein", "Avoid processed sugar"],
+          },
+          notes: { type: "string", example: "Focus on form over weight this week." },
+        },
+      },
+      ForgotPasswordBody: {
+        type: "object",
+        required: ["email"],
+        properties: { email: { type: "string", format: "email" } },
+      },
+      ResetPasswordBody: {
+        type: "object",
+        required: ["token", "newPassword"],
+        properties: {
+          token: {
+            type: "string",
+            description: "Token received from forgot-password response (dev) or email link (prod)",
+          },
+          newPassword: { type: "string", minLength: 8, format: "password" },
         },
       },
     },
@@ -195,12 +280,46 @@ export const openApiSpec = {
         responses: { 200: { description: "JWT + user" }, 401: { description: "Invalid credentials" } },
       },
     },
-    "/api/auth/me": {
+    "/api/auth/forgot-password": {
+      post: {
+        tags: ["Auth"],
+        summary: "Request password reset token",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ForgotPasswordBody" } },
+          },
+        },
+        responses: {
+          200: { description: "Reset link sent (or silently ignored if email not found)" },
+        },
+      },
+    },
+    "/api/auth/reset-password": {
+      post: {
+        tags: ["Auth"],
+        summary: "Reset password using token",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ResetPasswordBody" } },
+          },
+        },
+        responses: {
+          200: { description: "Password reset successful" },
+          400: { description: "Invalid or expired token" },
+        },
+      },
+    },
+    "/api/auth/verify-email": {
       get: {
         tags: ["Auth"],
-        summary: "Current user",
-        security: [{ bearerAuth: [] }],
-        responses: { 200: { description: "Profile" }, 401: { description: "Unauthorized" } },
+        summary: "Verify email address",
+        parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
+        responses: {
+          200: { description: "Email verified" },
+          400: { description: "Invalid token" },
+        },
       },
     },
     "/api/users/me/profile": {
@@ -222,7 +341,28 @@ export const openApiSpec = {
       },
     },
     "/api/coaches/public": {
-      get: { tags: ["Coaches"], summary: "List approved coaches", responses: { 200: { description: "Coach list" } } },
+      get: {
+        tags: ["Coaches"],
+        summary: "List approved coaches",
+        responses: {
+          200: {
+            description: "Coach list",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    coaches: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/CoachProfile" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     "/api/coaches/applications": {
       post: { tags: ["Coaches"], summary: "Apply to become coach (user role)", security: [{ bearerAuth: [] }], responses: { 201: { description: "Application submitted" } } },
@@ -235,6 +375,65 @@ export const openApiSpec = {
         security: [{ bearerAuth: [] }],
         parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
         responses: { 200: { description: "Decision recorded" } },
+      },
+    },
+    "/api/coaches/me/profile": {
+      patch: {
+        tags: ["Coaches"],
+        summary: "Update coach bio and specialties (trainer role)",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  bio: { type: "string", maxLength: 500 },
+                  specialties: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Profile updated" },
+          401: { description: "Unauthorized" },
+          403: { description: "Forbidden - trainer role required" },
+          404: { description: "No approved coach profile found" },
+        },
+      },
+    },
+    "/api/coaches/me/subscribers": {
+      get: {
+        tags: ["Coaches"],
+        summary: "List active subscribers for the authenticated coach (trainer role)",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: { description: "Subscriber list" },
+          401: { description: "Unauthorized" },
+          403: { description: "Forbidden" },
+        },
+      },
+    },
+    "/api/coaches/{id}": {
+      get: {
+        tags: ["Coaches"],
+        summary: "Get public coach profile by ID",
+        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+        responses: {
+          200: {
+            description: "Coach profile",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { coach: { $ref: "#/components/schemas/CoachProfile" } },
+                },
+              },
+            },
+          },
+          404: { description: "Coach not found" },
+        },
       },
     },
     "/api/subscriptions/me": {
@@ -254,10 +453,103 @@ export const openApiSpec = {
       get: { tags: ["Exercises"], summary: "List active exercises", parameters: [{ in: "query", name: "type", schema: { type: "string", enum: ["tracked", "guided"] } }], responses: { 200: { description: "Exercise list" } } },
       post: { tags: ["Exercises"], summary: "Create exercise (admin)", security: [{ bearerAuth: [] }], responses: { 201: { description: "Exercise created" } } },
     },
+    "/api/exercises/{id}": {
+      get: {
+        tags: ["Exercises"],
+        summary: "Get exercise by ID",
+        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+        responses: { 200: { description: "Exercise" }, 404: { description: "Not found" } },
+      },
+      patch: {
+        tags: ["Exercises"],
+        summary: "Update exercise (admin)",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  type: { type: "string", enum: ["tracked", "guided"] },
+                  instructions: { type: "string" },
+                  isActive: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Updated" },
+          401: { description: "Unauthorized" },
+          403: { description: "Forbidden" },
+          404: { description: "Not found" },
+        },
+      },
+    },
     "/api/workouts/me/plan": { get: { tags: ["Workouts"], summary: "Get my current active plan", security: [{ bearerAuth: [] }], responses: { 200: { description: "Plan or null" } } } },
-    "/api/workouts/coach/assignments": { post: { tags: ["Workouts"], summary: "Coach assigns plan to subscribed user", security: [{ bearerAuth: [] }], responses: { 201: { description: "Plan assigned" } } } },
+    "/api/workouts/coach/assignments": {
+      post: {
+        tags: ["Workouts"],
+        summary: "Coach assigns plan to subscribed user",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/AssignPlanBody" } } },
+        },
+        responses: { 201: { description: "Plan assigned" } },
+      },
+    },
     "/api/progress/sessions": { post: { tags: ["Progress"], summary: "Log workout session with tracked stats", security: [{ bearerAuth: [] }], responses: { 201: { description: "Session logged" } } } },
-    "/api/progress/me": { get: { tags: ["Progress"], summary: "Get progress summary and recent sessions", security: [{ bearerAuth: [] }], responses: { 200: { description: "Progress data" } } } },
+    "/api/progress/sessions/{id}": {
+      get: {
+        tags: ["Progress"],
+        summary: "Get a single workout session by ID",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+        responses: {
+          200: {
+            description: "Session detail",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { session: { $ref: "#/components/schemas/WorkoutSessionDetail" } },
+                },
+              },
+            },
+          },
+          401: { description: "Unauthorized" },
+          403: { description: "Forbidden - not your session" },
+          404: { description: "Session not found" },
+        },
+      },
+    },
+    "/api/progress/me": {
+      get: {
+        tags: ["Progress"],
+        summary: "Get progress summary and recent sessions",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: "query", name: "page", schema: { type: "integer", default: 1 } },
+          { in: "query", name: "limit", schema: { type: "integer", default: 20 } },
+          {
+            in: "query",
+            name: "from",
+            schema: { type: "string", format: "date" },
+            description: "ISO date string, e.g. 2025-01-01",
+          },
+          {
+            in: "query",
+            name: "to",
+            schema: { type: "string", format: "date" },
+            description: "ISO date string, e.g. 2025-12-31",
+          },
+        ],
+        responses: { 200: { description: "Progress data" } },
+      },
+    },
     "/api/admin/dashboard": {
       get: {
         tags: ["Admin"],
@@ -274,7 +566,7 @@ export const openApiSpec = {
         parameters: [
           { in: "query", name: "page", schema: { type: "integer", minimum: 1, default: 1 } },
           { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
-          { in: "query", name: "role", schema: { type: "string", enum: ["user", "trainer", "admin"] } },
+          { in: "query", name: "role", schema: { type: "string", enum: ["user", "coach", "admin"] } },
           { in: "query", name: "search", schema: { type: "string" } },
         ],
         responses: { 200: { description: "Users list" }, 403: { description: "Forbidden" } },

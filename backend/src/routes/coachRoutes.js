@@ -14,5 +14,8 @@ router.patch(
   requireRole("admin"),
   coach.decideApplication
 );
+router.patch("/me/profile", authMiddleware, requireRole("trainer"), coach.updateCoachProfile);
+router.get("/me/subscribers", authMiddleware, requireRole("trainer"), coach.getMySubscribers);
+router.get("/:id", coach.getCoachById);
 
 export default router;

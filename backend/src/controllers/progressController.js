@@ -39,10 +39,22 @@ export async function createWorkoutSession(req, res, next) {
 
 export async function getMyProgress(req, res, next) {
   try {
-    const sessions = await WorkoutSession.find({ userId: req.auth.userId })
-      .populate("exerciseId", "name type")
-      .sort({ sessionAt: -1 })
-      .limit(100);
+    const page = Math.max(Number(req.query.page ?? 1), 1);
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 20), 1), 100);
+    const skip = (page - 1) * limit;
+
+    const filter = { userId: req.auth.userId };
+    if (req.query.from) filter.sessionAt = { $gte: new Date(req.query.from) };
+    if (req.query.to) filter.sessionAt = { ...(filter.sessionAt ?? {}), $lte: new Date(req.query.to) };
+
+    const [sessions, total] = await Promise.all([
+      WorkoutSession.find(filter)
+        .populate("exerciseId", "name type")
+        .sort({ sessionAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      WorkoutSession.countDocuments(filter),
+    ]);
 
     const summary = sessions.reduce(
       (acc, s) => {
@@ -59,7 +71,27 @@ export async function getMyProgress(req, res, next) {
     res.json({
       summary: { ...summary, accuracy },
       sessions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getSessionById(req, res, next) {
+  try {
+    const { id } = req.params;
+    const session = await WorkoutSession.findById(id).populate(
+      "exerciseId",
+      "name type instructions"
+    );
+    if (!session) {
+      throw new AppError("Session not found", { statusCode: 404, code: "NOT_FOUND" });
+    }
+    if (String(session.userId) !== String(req.auth.userId)) {
+      throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
+    }
+    res.json({ session });
   } catch (err) {
     next(err);
   }
