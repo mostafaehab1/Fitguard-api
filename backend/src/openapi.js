@@ -6,13 +6,18 @@ export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "FitGuard API",
-    version: "0.4.0",
-    description: "Production-style backend contract for FitGuard. Base path: `/api`.",
+    version: "0.5.0",
+    description:
+      "Production-style backend contract for FitGuard. Base path: `/api`. Auth uses email verification before login and email-based password reset.",
   },
   servers: [{ url: "/", description: "This server" }],
   tags: [
     { name: "Health", description: "Liveness" },
-    { name: "Auth", description: "Registration and JWT" },
+    {
+      name: "Auth",
+      description:
+        "Registration, email verification, JWT login, and password reset. New users cannot log in until their email is verified.",
+    },
     { name: "Users", description: "Profile and AI free-tier plan" },
     { name: "Coaches", description: "Coach applications and listing" },
     { name: "Subscriptions", description: "Monthly coach subscriptions" },
@@ -47,6 +52,48 @@ export const openApiSpec = {
           profile: { $ref: "#/components/schemas/UserProfile" },
           emailVerified: { type: "boolean" },
           emailVerifiedAt: { type: "string", format: "date-time", nullable: true },
+        },
+      },
+      MessageResponse: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+      },
+      RegisterResponse: {
+        type: "object",
+        properties: {
+          user: { $ref: "#/components/schemas/User" },
+        },
+        example: {
+          user: {
+            id: "662f7b3d6b2f8a001234abcd",
+            email: "user@example.com",
+            role: "user",
+            emailVerified: false,
+            emailVerifiedAt: null,
+            profile: {
+              name: "Ahmed",
+              age: 24,
+              heightCm: 175,
+              weightKg: 72,
+              mealsPerDay: 4,
+              gender: "Male",
+              goal: "Muscle Building",
+              activityLevel: "Moderate",
+              dietaryPreference: "No restriction",
+              foodDislikes: "",
+              healthConditions: "",
+              allergies: "",
+            },
+          },
+        },
+      },
+      LoginResponse: {
+        type: "object",
+        properties: {
+          token: { type: "string", description: "JWT bearer token" },
+          user: { $ref: "#/components/schemas/User" },
         },
       },
       UserProfile: {
@@ -244,7 +291,8 @@ export const openApiSpec = {
         properties: {
           token: {
             type: "string",
-            description: "Token received from forgot-password response (dev) or email link (prod)",
+            description:
+              "Token from the reset email link query string. Example email link: /api/auth/reset-password?token=TOKEN",
           },
           newPassword: { type: "string", minLength: 8, format: "password" },
         },
@@ -259,17 +307,36 @@ export const openApiSpec = {
       post: {
         tags: ["Auth"],
         summary: "Register with complete fitness profile",
+        description:
+          "Creates a user with `emailVerified=false`, stores an email verification token, and sends a verification email. The user cannot log in until they open the verification link.",
         requestBody: {
           required: true,
           content: { "application/json": { schema: { $ref: "#/components/schemas/RegisterBody" } } },
         },
         responses: {
-          201: { description: "Created" },
+          201: {
+            description: "Created. Verification email sent; login is blocked until verified.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RegisterResponse" },
+              },
+            },
+          },
           400: {
             description: "Validation",
             content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
           },
-          409: { description: "Email taken" },
+          409: {
+            description: "Email taken",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+                example: {
+                  error: { code: "EMAIL_TAKEN", message: "Email already registered" },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -277,18 +344,63 @@ export const openApiSpec = {
       post: {
         tags: ["Auth"],
         summary: "Login",
+        description:
+          "Returns a JWT only after the user's email has been verified. If `emailVerifiedAt` is still null, this returns `EMAIL_NOT_VERIFIED`.",
         requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LoginBody" } } } },
         responses: {
-          200: { description: "JWT + user" },
-          401: { description: "Invalid credentials" },
-          403: { description: "Email verification required" },
+          200: {
+            description: "JWT + verified user",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/LoginResponse" },
+                example: {
+                  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  user: {
+                    id: "662f7b3d6b2f8a001234abcd",
+                    email: "user@example.com",
+                    role: "user",
+                    emailVerified: true,
+                    emailVerifiedAt: "2026-05-08T03:21:50.345Z",
+                    profile: {},
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: "Invalid credentials",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+                example: {
+                  error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password" },
+                },
+              },
+            },
+          },
+          403: {
+            description: "Email verification required",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+                example: {
+                  error: {
+                    code: "EMAIL_NOT_VERIFIED",
+                    message: "Please verify your email before logging in.",
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
     "/api/auth/forgot-password": {
       post: {
         tags: ["Auth"],
-        summary: "Request password reset token",
+        summary: "Send password reset email",
+        description:
+          "Accepts an email address and sends a reset link if the account exists. The response is intentionally generic so attackers cannot enumerate registered emails.",
         requestBody: {
           required: true,
           content: {
@@ -296,7 +408,17 @@ export const openApiSpec = {
           },
         },
         responses: {
-          200: { description: "Reset link sent (or silently ignored if email not found)" },
+          200: {
+            description: "Reset link sent if the email exists",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/MessageResponse" },
+                example: {
+                  message: "If that email exists, a reset link has been sent.",
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -304,15 +426,35 @@ export const openApiSpec = {
       get: {
         tags: ["Auth"],
         summary: "Open backend-hosted password reset form",
+        description:
+          "Backend-hosted HTML form for manual testing. The email reset link opens this page. Flutter does not need to use this route except to extract the `token` from the link.",
         parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
         responses: {
-          200: { description: "HTML reset password form" },
-          400: { description: "Invalid or expired token" },
+          200: {
+            description: "HTML reset password form",
+            content: {
+              "text/html": {
+                schema: { type: "string" },
+                example: "<!doctype html><html><body><h1>Reset password</h1></body></html>",
+              },
+            },
+          },
+          400: {
+            description: "Invalid or expired token",
+            content: {
+              "text/html": {
+                schema: { type: "string" },
+                example: "<!doctype html><html><body><h1>Reset link expired</h1></body></html>",
+              },
+            },
+          },
         },
       },
       post: {
         tags: ["Auth"],
         summary: "Reset password using token",
+        description:
+          "Flutter/API flow. Submit the reset `token` from the email URL and the new password. On success, the password is updated and the reset token is cleared.",
         requestBody: {
           required: true,
           content: {
@@ -320,8 +462,43 @@ export const openApiSpec = {
           },
         },
         responses: {
-          200: { description: "Password reset successful" },
-          400: { description: "Invalid or expired token" },
+          200: {
+            description: "Password reset successful",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/MessageResponse" },
+                example: { message: "Password reset successful." },
+              },
+            },
+          },
+          400: {
+            description: "Invalid input or expired token",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+                examples: {
+                  invalidToken: {
+                    summary: "Invalid or expired token",
+                    value: {
+                      error: {
+                        code: "INVALID_RESET_TOKEN",
+                        message: "Invalid or expired reset token",
+                      },
+                    },
+                  },
+                  validation: {
+                    summary: "Missing token or short password",
+                    value: {
+                      error: {
+                        code: "VALIDATION_ERROR",
+                        message: "token and newPassword (min 8 chars) are required",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -329,10 +506,39 @@ export const openApiSpec = {
       get: {
         tags: ["Auth"],
         summary: "Verify email address",
+        description:
+          "The verification link sent during registration points here. On success, `emailVerifiedAt` is set and the verification token is cleared; the user can then log in.",
         parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
         responses: {
-          200: { description: "Email verified" },
-          400: { description: "Invalid token" },
+          200: {
+            description: "Email verified",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/MessageResponse" },
+                examples: {
+                  verified: {
+                    summary: "Verified successfully",
+                    value: { message: "Email verified successfully." },
+                  },
+                  alreadyVerified: {
+                    summary: "Already verified",
+                    value: { message: "Email already verified." },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Invalid token",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+                example: {
+                  error: { code: "INVALID_TOKEN", message: "Invalid verification token" },
+                },
+              },
+            },
+          },
         },
       },
     },
