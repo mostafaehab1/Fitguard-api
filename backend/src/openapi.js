@@ -45,6 +45,7 @@ export const openApiSpec = {
           email: { type: "string", format: "email" },
           role: { type: "string", enum: ["user", "coach", "admin"] },
           profile: { $ref: "#/components/schemas/UserProfile" },
+          emailVerified: { type: "boolean" },
           emailVerifiedAt: { type: "string", format: "date-time", nullable: true },
         },
       },
@@ -277,7 +278,11 @@ export const openApiSpec = {
         tags: ["Auth"],
         summary: "Login",
         requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LoginBody" } } } },
-        responses: { 200: { description: "JWT + user" }, 401: { description: "Invalid credentials" } },
+        responses: {
+          200: { description: "JWT + user" },
+          401: { description: "Invalid credentials" },
+          403: { description: "Email verification required" },
+        },
       },
     },
     "/api/auth/forgot-password": {

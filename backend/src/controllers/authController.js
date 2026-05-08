@@ -37,6 +37,8 @@ function publicUser(doc) {
     id: doc.id,
     email: doc.email,
     role: doc.role === "trainer" ? "coach" : doc.role,
+    emailVerified: Boolean(doc.emailVerifiedAt),
+    emailVerifiedAt: doc.emailVerifiedAt ?? null,
     profile: doc.profile
       ? {
           name: doc.profile.name ?? null,
@@ -194,6 +196,13 @@ export async function login(req, res, next) {
       throw new AppError("Invalid email or password", {
         statusCode: 401,
         code: "INVALID_CREDENTIALS",
+      });
+    }
+
+    if (!doc.emailVerifiedAt) {
+      throw new AppError("Please verify your email before logging in.", {
+        statusCode: 403,
+        code: "EMAIL_NOT_VERIFIED",
       });
     }
 
