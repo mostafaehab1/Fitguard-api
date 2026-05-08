@@ -301,6 +301,15 @@ export const openApiSpec = {
       },
     },
     "/api/auth/reset-password": {
+      get: {
+        tags: ["Auth"],
+        summary: "Open backend-hosted password reset form",
+        parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
+        responses: {
+          200: { description: "HTML reset password form" },
+          400: { description: "Invalid or expired token" },
+        },
+      },
       post: {
         tags: ["Auth"],
         summary: "Reset password using token",

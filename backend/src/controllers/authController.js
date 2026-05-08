@@ -32,6 +32,15 @@ function normalizeRole(role) {
   return "user";
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function publicUser(doc) {
   return {
     id: doc.id,
@@ -244,6 +253,118 @@ export async function forgotPassword(req, res, next) {
       ...(env.nodeEnv !== "production" ? { emailDelivery } : {}),
       ...(env.nodeEnv !== "production" ? { devToken: token } : {}),
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPasswordPage(req, res, next) {
+  try {
+    const token = String(req.query.token ?? "").trim();
+    const user = token
+      ? await User.findOne({
+          resetToken: token,
+          resetTokenExpiresAt: { $gt: new Date() },
+        }).select("email")
+      : null;
+
+    if (!user) {
+      res.status(400).type("html").send(`
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Reset password</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #14171f; }
+              main { width: min(420px, calc(100vw - 32px)); background: white; border: 1px solid #d9dee8; border-radius: 8px; padding: 24px; }
+              h1 { font-size: 22px; margin: 0 0 12px; }
+              p { line-height: 1.5; margin: 0; color: #4b5565; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>Reset link expired</h1>
+              <p>This password reset link is invalid or expired. Request a new password reset email and try again.</p>
+            </main>
+          </body>
+        </html>
+      `);
+      return;
+    }
+
+    res.type("html").send(`
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reset password</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #14171f; }
+            main { width: min(420px, calc(100vw - 32px)); background: white; border: 1px solid #d9dee8; border-radius: 8px; padding: 24px; }
+            h1 { font-size: 22px; margin: 0 0 8px; }
+            p { line-height: 1.5; margin: 0 0 18px; color: #4b5565; }
+            label { display: block; font-weight: 700; margin: 14px 0 6px; }
+            input { box-sizing: border-box; width: 100%; border: 1px solid #b8c0cc; border-radius: 6px; font-size: 16px; padding: 10px 12px; }
+            button { width: 100%; border: 0; border-radius: 6px; margin-top: 18px; padding: 11px 14px; background: #1769e0; color: white; font-size: 16px; font-weight: 700; cursor: pointer; }
+            button:disabled { opacity: .65; cursor: wait; }
+            #message { margin-top: 14px; min-height: 22px; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Reset password</h1>
+            <p>Enter a new password for ${escapeHtml(user.email)}.</p>
+            <form id="reset-form">
+              <label for="newPassword">New password</label>
+              <input id="newPassword" name="newPassword" type="password" minlength="8" required autocomplete="new-password" />
+              <label for="confirmPassword">Confirm password</label>
+              <input id="confirmPassword" name="confirmPassword" type="password" minlength="8" required autocomplete="new-password" />
+              <button type="submit">Reset password</button>
+              <p id="message" role="status"></p>
+            </form>
+          </main>
+          <script>
+            const token = ${JSON.stringify(token)};
+            const form = document.getElementById("reset-form");
+            const message = document.getElementById("message");
+            const button = form.querySelector("button");
+
+            form.addEventListener("submit", async (event) => {
+              event.preventDefault();
+              const newPassword = form.newPassword.value;
+              const confirmPassword = form.confirmPassword.value;
+              if (newPassword !== confirmPassword) {
+                message.textContent = "Passwords do not match.";
+                return;
+              }
+
+              button.disabled = true;
+              message.textContent = "Resetting password...";
+              try {
+                const response = await fetch("/api/auth/reset-password", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ token, newPassword }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                  throw new Error(data?.error?.message || "Password reset failed.");
+                }
+                form.reset();
+                message.textContent = data.message || "Password reset successful.";
+              } catch (err) {
+                message.textContent = err.message;
+              } finally {
+                button.disabled = false;
+              }
+            });
+          </script>
+        </body>
+      </html>
+    `);
   } catch (err) {
     next(err);
   }
