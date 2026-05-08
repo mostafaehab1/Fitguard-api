@@ -10,6 +10,10 @@ import {
 } from "../models/User.js";
 import { env } from "../config.js";
 import { AppError } from "../middlewares/errorHandler.js";
+import {
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "../services/emailService.js";
 
 const SALT_ROUNDS = 10;
 
@@ -151,9 +155,14 @@ export async function register(req, res, next) {
 
     const emailVerificationToken = crypto.randomBytes(32).toString("hex");
     await User.findByIdAndUpdate(doc.id, { emailVerificationToken });
+    const emailDelivery = await sendVerificationEmail({
+      to: em,
+      token: emailVerificationToken,
+    });
 
     res.status(201).json({
       user: publicUser(doc),
+      ...(env.nodeEnv !== "production" ? { emailDelivery } : {}),
       ...(env.nodeEnv !== "production" ? { devEmailVerificationToken: emailVerificationToken } : {}),
     });
   } catch (err) {
@@ -219,9 +228,11 @@ export async function forgotPassword(req, res, next) {
     userWithToken.resetToken = token;
     userWithToken.resetTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
     await userWithToken.save();
+    const emailDelivery = await sendPasswordResetEmail({ to: em, token });
 
     res.json({
       message: "If that email exists, a reset link has been sent.",
+      ...(env.nodeEnv !== "production" ? { emailDelivery } : {}),
       ...(env.nodeEnv !== "production" ? { devToken: token } : {}),
     });
   } catch (err) {
