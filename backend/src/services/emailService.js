@@ -49,7 +49,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html }) {
   const tx = getTransporter();
   if (!tx) {
     console.warn(`[email] SMTP is not configured; skipped email to ${to}: ${subject}`);

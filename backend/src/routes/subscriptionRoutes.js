@@ -5,8 +5,8 @@ import * as subscriptions from "../controllers/subscriptionController.js";
 
 const router = Router();
 
-router.get("/me", authMiddleware, requireRole("user"), subscriptions.getMySubscription);
-router.post("/", authMiddleware, requireRole("user"), subscriptions.subscribeCoach);
-router.delete("/me", authMiddleware, requireRole("user"), subscriptions.cancelMySubscription);
+router.get("/me", authMiddleware, subscriptions.getMySubscription);
+router.post("/", authMiddleware, subscriptions.subscribeCoach);
+router.delete("/me", authMiddleware, subscriptions.cancelMySubscription);
 
 export default router;

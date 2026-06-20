@@ -14,6 +14,12 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "../services/emailService.js";
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  sha256,
+} from "../services/tokenService.js";
 
 const SALT_ROUNDS = 10;
 
@@ -23,7 +29,7 @@ function normalizeEmail(email) {
 
 function normalizeRole(role) {
   const r = String(role ?? "user").toLowerCase();
-  if (r === "admin" || r === "trainer") {
+  if (r === "admin" || r === "coach") {
     throw new AppError("Cannot self-register with elevated role", {
       statusCode: 403,
       code: "FORBIDDEN_ROLE",
@@ -45,9 +51,10 @@ function publicUser(doc) {
   return {
     id: doc.id,
     email: doc.email,
-    role: doc.role === "trainer" ? "coach" : doc.role,
+    role: doc.role,
     emailVerified: Boolean(doc.emailVerifiedAt),
     emailVerifiedAt: doc.emailVerifiedAt ?? null,
+    onboardingCompleted: Boolean(doc.onboardingCompletedAt),
     profile: doc.profile
       ? {
           name: doc.profile.name ?? null,
@@ -133,7 +140,7 @@ function normalizeRegistrationProfile(input) {
 
 export async function register(req, res, next) {
   try {
-    const { email, password, role, profile } = req.body ?? {};
+    const { email, password } = req.body ?? {};
     const em = normalizeEmail(email);
 
     if (!em) {
@@ -154,18 +161,20 @@ export async function register(req, res, next) {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const userRole = normalizeRole(role);
-    const normalizedProfile = normalizeRegistrationProfile(profile);
 
+    // Registration collects email + password only; the profile is completed later
+    // via POST /users/me/onboarding (A1 split).
     const doc = await User.create({
       email: em,
       passwordHash,
-      role: userRole,
-      profile: normalizedProfile,
+      role: "user",
     });
 
     const emailVerificationToken = crypto.randomBytes(32).toString("hex");
-    await User.findByIdAndUpdate(doc.id, { emailVerificationToken });
+    await User.findByIdAndUpdate(doc.id, {
+      emailVerificationToken: sha256(emailVerificationToken),
+      emailVerificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
     const emailDelivery = await sendVerificationEmail({
       to: em,
       token: emailVerificationToken,
@@ -215,13 +224,55 @@ export async function login(req, res, next) {
       });
     }
 
-    const token = jwt.sign(
-      { sub: doc.id, role: doc.role },
-      env.jwtSecret,
-      { expiresIn: env.jwtExpiresIn }
-    );
+    const accessToken = signAccessToken(doc);
+    const refreshToken = signRefreshToken(doc);
+    doc.refreshTokenHash = sha256(refreshToken);
+    await doc.save();
 
-    res.json({ token, user: publicUser(doc) });
+    res.json({ accessToken, refreshToken, user: publicUser(doc) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refresh(req, res, next) {
+  try {
+    const { refreshToken } = req.body ?? {};
+    if (!refreshToken) {
+      throw new AppError("refreshToken is required", { code: "VALIDATION_ERROR" });
+    }
+    let payload;
+    try {
+      payload = verifyRefreshToken(refreshToken);
+    } catch {
+      throw new AppError("Invalid or expired refresh token", {
+        statusCode: 401,
+        code: "UNAUTHORIZED",
+      });
+    }
+    const user = await User.findById(payload.sub).select("+refreshTokenHash");
+    if (!user || user.refreshTokenHash !== sha256(refreshToken)) {
+      throw new AppError("Invalid or expired refresh token", {
+        statusCode: 401,
+        code: "UNAUTHORIZED",
+      });
+    }
+    const accessToken = signAccessToken(user);
+    const newRefreshToken = signRefreshToken(user);
+    user.refreshTokenHash = sha256(newRefreshToken);
+    await user.save();
+    res.json({ accessToken, refreshToken: newRefreshToken });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function logout(req, res, next) {
+  try {
+    if (req.auth?.userId) {
+      await User.findByIdAndUpdate(req.auth.userId, { $set: { refreshTokenHash: null } });
+    }
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -243,7 +294,7 @@ export async function forgotPassword(req, res, next) {
 
     const token = crypto.randomBytes(32).toString("hex");
     const userWithToken = await User.findById(user.id).select("+resetToken +resetTokenExpiresAt");
-    userWithToken.resetToken = token;
+    userWithToken.resetToken = sha256(token);
     userWithToken.resetTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
     await userWithToken.save();
     const emailDelivery = await sendPasswordResetEmail({ to: em, token });
@@ -263,7 +314,7 @@ export async function resetPasswordPage(req, res, next) {
     const token = String(req.query.token ?? "").trim();
     const user = token
       ? await User.findOne({
-          resetToken: token,
+          resetToken: sha256(token),
           resetTokenExpiresAt: { $gt: new Date() },
         }).select("email")
       : null;
@@ -380,7 +431,7 @@ export async function resetPassword(req, res, next) {
     }
 
     const user = await User.findOne({
-      resetToken: token,
+      resetToken: sha256(token),
       resetTokenExpiresAt: { $gt: new Date() },
     }).select("+resetToken +resetTokenExpiresAt +passwordHash");
 
@@ -412,22 +463,20 @@ export async function verifyEmail(req, res, next) {
       });
     }
 
-    const user = await User.findOne({ emailVerificationToken: token }).select(
-      "+emailVerificationToken"
-    );
+    const user = await User.findOne({
+      emailVerificationToken: sha256(token),
+      emailVerificationTokenExpiresAt: { $gt: new Date() },
+    }).select("+emailVerificationToken +emailVerificationTokenExpiresAt");
     if (!user) {
-      throw new AppError("Invalid verification token", {
+      throw new AppError("Invalid or expired verification token", {
         statusCode: 400,
         code: "INVALID_TOKEN",
       });
     }
-    if (user.emailVerifiedAt) {
-      res.json({ message: "Email already verified." });
-      return;
-    }
 
     user.emailVerifiedAt = new Date();
     user.emailVerificationToken = null;
+    user.emailVerificationTokenExpiresAt = null;
     await user.save();
     res.json({ message: "Email verified successfully." });
   } catch (err) {

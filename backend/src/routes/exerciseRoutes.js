@@ -6,6 +6,7 @@ import * as exercise from "../controllers/exerciseController.js";
 const router = Router();
 
 router.get("/", exercise.listExercises);
+router.get("/cv-config", exercise.getCvConfig);
 router.post("/", authMiddleware, requireRole("admin"), exercise.createExercise);
 router.get("/:id", exercise.getExerciseById);
 router.patch("/:id", authMiddleware, requireRole("admin"), exercise.updateExercise);

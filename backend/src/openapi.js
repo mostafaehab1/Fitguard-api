@@ -1,35 +1,74 @@
 /**
- * OpenAPI 3.0 spec — edit here as you add routes.
+ * OpenAPI 3.0 spec for the FitGuard API.
  * UI: GET /api-docs   |   Raw JSON: GET /openapi.json
  */
+const bearer = [{ bearerAuth: [] }];
+
+const errRef = { schema: { $ref: "#/components/schemas/Error" } };
+const errors = {
+  400: { description: "Validation error", content: { "application/json": errRef } },
+  401: { description: "Unauthorized", content: { "application/json": errRef } },
+  403: { description: "Forbidden", content: { "application/json": errRef } },
+  404: { description: "Not found", content: { "application/json": errRef } },
+  409: { description: "Conflict", content: { "application/json": errRef } },
+  429: { description: "Rate limited", content: { "application/json": errRef } },
+};
+
+// Builds a path operation compactly.
+function op({ tag, summary, auth = false, params = [], body, example, responses, errs = [400, 401, 403, 404] }) {
+  const operation = {
+    tags: [tag],
+    summary,
+    responses: {
+      ...(responses ?? { 200: { description: "OK" } }),
+      ...Object.fromEntries(errs.map((c) => [c, errors[c]])),
+    },
+  };
+  if (auth) operation.security = bearer;
+  if (params.length) operation.parameters = params;
+  if (body || example) {
+    operation.requestBody = {
+      required: true,
+      content: { "application/json": { schema: body ?? { type: "object" }, ...(example ? { example } : {}) } },
+    };
+  }
+  return operation;
+}
+
+const q = (name, description, extra = {}) => ({ name, in: "query", required: false, schema: { type: "string", ...extra }, description });
+const p = (name, description) => ({ name, in: "path", required: true, schema: { type: "string" }, description });
+
+const created = (description = "Created") => ({ 201: { description } });
+const okR = (description = "OK") => ({ 200: { description } });
+
 export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "FitGuard API",
-    version: "0.5.0",
+    version: "1.0.0",
     description:
-      "Production-style backend contract for FitGuard. Base path: `/api`. Auth uses email verification before login and email-based password reset.",
+      "AI-assisted fitness & injury-prevention platform. Base path: `/api`. " +
+      "Auth: register (email+password) → verify email → login → onboarding (auto-generates an AI plan). " +
+      "The phone identifies exercises by `trackedKey` and posts only raw rep/mistake events; " +
+      "the backend owns all derived scoring (accuracy, injury risk).",
   },
   servers: [{ url: "/", description: "This server" }],
   tags: [
-    { name: "Health", description: "Liveness" },
-    {
-      name: "Auth",
-      description:
-        "Registration, email verification, JWT login, and password reset. New users cannot log in until their email is verified.",
-    },
-    { name: "Users", description: "Profile and AI free-tier plan" },
-    { name: "Coaches", description: "Coach applications and listing" },
-    { name: "Subscriptions", description: "Monthly coach subscriptions" },
-    { name: "Exercises", description: "Tracked and guided exercise catalog" },
-    { name: "Workouts", description: "Assigned workout and nutrition plans" },
-    { name: "Progress", description: "Workout sessions and CV stats" },
-    { name: "Admin", description: "Application control and user management" },
+    { name: "Health" },
+    { name: "Auth", description: "Register, verify, JWT access+refresh, password reset" },
+    { name: "Users", description: "Profile, onboarding, AI plan" },
+    { name: "Plans", description: "Active plan + coach plan authoring" },
+    { name: "Exercises", description: "Catalog + on-device CV config" },
+    { name: "Workouts", description: "Session submission + history" },
+    { name: "Progress", description: "Summary, injury risk, trends" },
+    { name: "Coaches", description: "Directory, applications, profile, subscribers" },
+    { name: "Subscriptions", description: "Monthly coach subscriptions (mock billing)" },
+    { name: "Notifications", description: "In-app notifications" },
+    { name: "Media", description: "Uploads (profile, certs, transformations)" },
+    { name: "Admin", description: "Users, coach applications, mistake taxonomy" },
   ],
   components: {
-    securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
-    },
+    securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
     schemas: {
       Error: {
         type: "object",
@@ -43,804 +82,194 @@ export const openApiSpec = {
           },
         },
       },
-      User: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          email: { type: "string", format: "email" },
-          role: { type: "string", enum: ["user", "coach", "admin"] },
-          profile: { $ref: "#/components/schemas/UserProfile" },
-          emailVerified: { type: "boolean" },
-          emailVerifiedAt: { type: "string", format: "date-time", nullable: true },
-        },
-      },
-      MessageResponse: {
-        type: "object",
-        properties: {
-          message: { type: "string" },
-        },
-      },
-      RegisterResponse: {
-        type: "object",
-        properties: {
-          user: { $ref: "#/components/schemas/User" },
-        },
-        example: {
-          user: {
-            id: "662f7b3d6b2f8a001234abcd",
-            email: "user@example.com",
-            role: "user",
-            emailVerified: false,
-            emailVerifiedAt: null,
-            profile: {
-              name: "Ahmed",
-              age: 24,
-              heightCm: 175,
-              weightKg: 72,
-              mealsPerDay: 4,
-              gender: "Male",
-              goal: "Muscle Building",
-              activityLevel: "Moderate",
-              dietaryPreference: "No restriction",
-              foodDislikes: "",
-              healthConditions: "",
-              allergies: "",
-            },
-          },
-        },
-      },
-      LoginResponse: {
-        type: "object",
-        properties: {
-          token: { type: "string", description: "JWT bearer token" },
-          user: { $ref: "#/components/schemas/User" },
-        },
-      },
-      UserProfile: {
-        type: "object",
-        required: [
-          "age",
-          "heightCm",
-          "weightKg",
-          "mealsPerDay",
-          "gender",
-          "goal",
-          "activityLevel",
-          "dietaryPreference",
-        ],
-        properties: {
-          name: { type: "string", nullable: true },
-          age: { type: "integer", minimum: 8, maximum: 110, example: 24 },
-          heightCm: { type: "number", minimum: 80, maximum: 260, example: 175 },
-          weightKg: { type: "number", minimum: 20, maximum: 350, example: 72 },
-          mealsPerDay: { type: "integer", minimum: 1, maximum: 12, example: 4 },
-          gender: { type: "string", enum: ["Male", "Female"] },
-          goal: { type: "string", enum: ["Muscle Building", "Weight Loss", "Maintain"] },
-          activityLevel: {
-            type: "string",
-            enum: ["Sedentary", "Light", "Moderate", "Active", "Very Active"],
-          },
-          dietaryPreference: {
-            type: "string",
-            enum: ["No restriction", "Vegetarian", "Vegan", "Pescatarian", "Low-carb"],
-          },
-          foodDislikes: { type: "string", example: "liver, okra..." },
-          healthConditions: {
-            type: "string",
-            example: "diabetes, high blood pressure...",
-          },
-          allergies: { type: "string", example: "nuts, lactose, gluten..." },
-        },
-      },
-      RegisterBody: {
-        type: "object",
-        required: ["email", "password", "profile"],
-        properties: {
-          email: { type: "string", format: "email" },
-          password: { type: "string", format: "password", minLength: 8 },
-          role: {
-            type: "string",
-            enum: ["user"],
-            default: "user",
-            description: "Always resolves to user. Cannot self-register as trainer or admin.",
-          },
-          profile: { $ref: "#/components/schemas/UserProfile" },
-        },
-      },
-      LoginBody: {
-        type: "object",
-        required: ["email", "password"],
-        properties: {
-          email: { type: "string", format: "email" },
-          password: { type: "string", format: "password" },
-        },
-      },
-      Exercise: {
-        type: "object",
-        properties: {
-          _id: { type: "string" },
-          name: { type: "string" },
-          type: { type: "string", enum: ["tracked", "guided"] },
-          instructions: { type: "string" },
-          isActive: { type: "boolean" },
-        },
-      },
-      PlanAssignment: {
-        type: "object",
-        properties: {
-          _id: { type: "string" },
-          userId: { type: "string" },
-          assignedBy: { type: "string" },
-          source: { type: "string", enum: ["ai", "coach"] },
-          workoutPlan: { type: "array", items: { type: "string" } },
-          nutritionPlan: { type: "array", items: { type: "string" } },
-          notes: { type: "string" },
-          active: { type: "boolean" },
-        },
-      },
-      Subscription: {
-        type: "object",
-        properties: {
-          _id: { type: "string" },
-          userId: { type: "string" },
-          coachId: { type: "string" },
-          startDate: { type: "string", format: "date-time" },
-          endDate: { type: "string", format: "date-time" },
-          status: { type: "string", enum: ["active", "cancelled", "expired"] },
-        },
-      },
-      WorkoutSession: {
-        type: "object",
-        properties: {
-          _id: { type: "string" },
-          userId: { type: "string" },
-          exerciseId: { type: "string" },
-          tracked: { type: "boolean" },
-          totalReps: { type: "number" },
-          correctReps: { type: "number" },
-          wrongReps: { type: "number" },
-          mistakes: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { type: { type: "string" }, count: { type: "number" } },
-            },
-          },
-          sessionAt: { type: "string", format: "date-time" },
-        },
-      },
-      AdminUserRoleUpdateBody: {
-        type: "object",
-        required: ["role"],
-        properties: {
-          role: { type: "string", enum: ["user", "coach", "admin"] },
-        },
-      },
-      CoachProfile: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          email: { type: "string", format: "email" },
-          name: { type: "string", nullable: true },
-          bio: { type: "string", nullable: true, maxLength: 500 },
-          specialties: { type: "array", items: { type: "string" } },
-          memberSince: { type: "string", format: "date-time" },
-        },
-      },
-      WorkoutSessionDetail: {
-        type: "object",
-        properties: {
-          _id: { type: "string" },
-          userId: { type: "string" },
-          exerciseId: {
-            type: "object",
-            properties: {
-              _id: { type: "string" },
-              name: { type: "string" },
-              type: { type: "string", enum: ["tracked", "guided"] },
-              instructions: { type: "string" },
-            },
-          },
-          tracked: { type: "boolean" },
-          totalReps: { type: "integer" },
-          correctReps: { type: "integer" },
-          wrongReps: { type: "integer" },
-          mistakes: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                type: { type: "string" },
-                count: { type: "integer", minimum: 1 },
-              },
-            },
-          },
-          sessionAt: { type: "string", format: "date-time" },
-        },
-      },
-      AssignPlanBody: {
-        type: "object",
-        required: ["userId", "workoutPlan"],
-        properties: {
-          userId: {
-            type: "string",
-            description: "ObjectId of the subscribed user to assign the plan to",
-          },
-          workoutPlan: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-            example: ["3x10 squats", "3x12 push-ups", "30 min cardio"],
-          },
-          nutritionPlan: {
-            type: "array",
-            items: { type: "string" },
-            example: ["2500 kcal/day", "150g protein", "Avoid processed sugar"],
-          },
-          notes: { type: "string", example: "Focus on form over weight this week." },
-        },
-      },
-      ForgotPasswordBody: {
-        type: "object",
-        required: ["email"],
-        properties: { email: { type: "string", format: "email" } },
-      },
-      ResetPasswordBody: {
-        type: "object",
-        required: ["token", "newPassword"],
-        properties: {
-          token: {
-            type: "string",
-            description:
-              "Token from the reset email link query string. Example email link: /api/auth/reset-password?token=TOKEN",
-          },
-          newPassword: { type: "string", minLength: 8, format: "password" },
-        },
-      },
     },
   },
   paths: {
-    "/api/health": {
-      get: { tags: ["Health"], summary: "Health check", responses: { 200: { description: "OK" } } },
-    },
+    "/api/health": { get: op({ tag: "Health", summary: "Liveness", errs: [] }) },
+
     "/api/auth/register": {
-      post: {
-        tags: ["Auth"],
-        summary: "Register with complete fitness profile",
-        description:
-          "Creates a user with `emailVerified=false`, stores an email verification token, and sends a verification email. The user cannot log in until they open the verification link.",
-        requestBody: {
-          required: true,
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RegisterBody" } } },
-        },
-        responses: {
-          201: {
-            description: "Created. Verification email sent; login is blocked until verified.",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/RegisterResponse" },
-              },
-            },
-          },
-          400: {
-            description: "Validation",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
-          },
-          409: {
-            description: "Email taken",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: {
-                  error: { code: "EMAIL_TAKEN", message: "Email already registered" },
-                },
-              },
-            },
-          },
-        },
-      },
+      post: op({
+        tag: "Auth",
+        summary: "Register (email + password only)",
+        example: { email: "user@example.com", password: "password123" },
+        responses: created("User created; verification email sent"),
+        errs: [400, 409, 429],
+      }),
     },
     "/api/auth/login": {
-      post: {
-        tags: ["Auth"],
-        summary: "Login",
-        description:
-          "Returns a JWT only after the user's email has been verified. If `emailVerifiedAt` is still null, this returns `EMAIL_NOT_VERIFIED`.",
-        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LoginBody" } } } },
-        responses: {
-          200: {
-            description: "JWT + verified user",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/LoginResponse" },
-                example: {
-                  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                  user: {
-                    id: "662f7b3d6b2f8a001234abcd",
-                    email: "user@example.com",
-                    role: "user",
-                    emailVerified: true,
-                    emailVerifiedAt: "2026-05-08T03:21:50.345Z",
-                    profile: {},
-                  },
-                },
-              },
-            },
-          },
-          401: {
-            description: "Invalid credentials",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: {
-                  error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password" },
-                },
-              },
-            },
-          },
-          403: {
-            description: "Email verification required",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: {
-                  error: {
-                    code: "EMAIL_NOT_VERIFIED",
-                    message: "Please verify your email before logging in.",
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      post: op({
+        tag: "Auth",
+        summary: "Login → accessToken + refreshToken",
+        example: { email: "user@example.com", password: "password123" },
+        responses: okR("Returns accessToken, refreshToken, user"),
+        errs: [400, 401, 403, 429],
+      }),
+    },
+    "/api/auth/refresh": {
+      post: op({
+        tag: "Auth",
+        summary: "Rotate tokens",
+        example: { refreshToken: "<refresh token>" },
+        errs: [400, 401, 429],
+      }),
+    },
+    "/api/auth/logout": {
+      post: op({ tag: "Auth", summary: "Revoke refresh token", auth: true, errs: [401] }),
     },
     "/api/auth/forgot-password": {
-      post: {
-        tags: ["Auth"],
-        summary: "Send password reset email",
-        description:
-          "Accepts an email address and sends a reset link if the account exists. The response is intentionally generic so attackers cannot enumerate registered emails.",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/ForgotPasswordBody" } },
-          },
-        },
-        responses: {
-          200: {
-            description: "Reset link sent if the email exists",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/MessageResponse" },
-                example: {
-                  message: "If that email exists, a reset link has been sent.",
-                },
-              },
-            },
-          },
-        },
-      },
+      post: op({ tag: "Auth", summary: "Send reset email (no enumeration)", example: { email: "user@example.com" }, errs: [400, 429] }),
     },
     "/api/auth/reset-password": {
-      get: {
-        tags: ["Auth"],
-        summary: "Open backend-hosted password reset form",
-        description:
-          "Backend-hosted HTML form for manual testing. The email reset link opens this page. Flutter does not need to use this route except to extract the `token` from the link.",
-        parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
-        responses: {
-          200: {
-            description: "HTML reset password form",
-            content: {
-              "text/html": {
-                schema: { type: "string" },
-                example: "<!doctype html><html><body><h1>Reset password</h1></body></html>",
-              },
-            },
-          },
-          400: {
-            description: "Invalid or expired token",
-            content: {
-              "text/html": {
-                schema: { type: "string" },
-                example: "<!doctype html><html><body><h1>Reset link expired</h1></body></html>",
-              },
-            },
-          },
-        },
-      },
-      post: {
-        tags: ["Auth"],
-        summary: "Reset password using token",
-        description:
-          "Flutter/API flow. Submit the reset `token` from the email URL and the new password. On success, the password is updated and the reset token is cleared.",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/ResetPasswordBody" } },
-          },
-        },
-        responses: {
-          200: {
-            description: "Password reset successful",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/MessageResponse" },
-                example: { message: "Password reset successful." },
-              },
-            },
-          },
-          400: {
-            description: "Invalid input or expired token",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                examples: {
-                  invalidToken: {
-                    summary: "Invalid or expired token",
-                    value: {
-                      error: {
-                        code: "INVALID_RESET_TOKEN",
-                        message: "Invalid or expired reset token",
-                      },
-                    },
-                  },
-                  validation: {
-                    summary: "Missing token or short password",
-                    value: {
-                      error: {
-                        code: "VALIDATION_ERROR",
-                        message: "token and newPassword (min 8 chars) are required",
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      get: op({ tag: "Auth", summary: "Reset password HTML page", params: [q("token", "Reset token")], errs: [400] }),
+      post: op({ tag: "Auth", summary: "Reset password", example: { token: "<token>", newPassword: "newpassword123" }, errs: [400, 429] }),
     },
     "/api/auth/verify-email": {
-      get: {
-        tags: ["Auth"],
-        summary: "Verify email address",
-        description:
-          "The verification link sent during registration points here. On success, `emailVerifiedAt` is set and the verification token is cleared; the user can then log in.",
-        parameters: [{ in: "query", name: "token", required: true, schema: { type: "string" } }],
-        responses: {
-          200: {
-            description: "Email verified",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/MessageResponse" },
-                examples: {
-                  verified: {
-                    summary: "Verified successfully",
-                    value: { message: "Email verified successfully." },
-                  },
-                  alreadyVerified: {
-                    summary: "Already verified",
-                    value: { message: "Email already verified." },
-                  },
-                },
-              },
-            },
-          },
-          400: {
-            description: "Invalid token",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-                example: {
-                  error: { code: "INVALID_TOKEN", message: "Invalid verification token" },
-                },
-              },
-            },
-          },
-        },
-      },
+      get: op({ tag: "Auth", summary: "Verify email", params: [q("token", "Verification token")], errs: [400] }),
     },
+
     "/api/users/me/profile": {
-      get: { tags: ["Users"], summary: "Get current user profile", security: [{ bearerAuth: [] }], responses: { 200: { description: "Profile" } } },
-      patch: {
-        tags: ["Users"],
-        summary: "Update current user profile",
-        security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/UserProfile" } } } },
-        responses: { 200: { description: "Profile updated" } },
-      },
+      get: op({ tag: "Users", summary: "My profile", auth: true, errs: [401, 404] }),
+      patch: op({ tag: "Users", summary: "Update profile fields", auth: true, example: { weightKg: 80, limitations: ["Knee"] }, errs: [400, 401] }),
+    },
+    "/api/users/me/onboarding": {
+      post: op({
+        tag: "Users",
+        summary: "Complete onboarding (+ disclaimer) → auto-generates AI plan",
+        auth: true,
+        example: {
+          name: "Sara", age: 24, gender: "Female", heightCm: 168, weightKg: 62,
+          goal: "Muscle Building", experienceLevel: "Beginner", activityLevel: "Moderate",
+          daysPerWeek: 4, mealsPerDay: 3, dietaryPreference: "No restriction",
+          limitations: ["Knee"], disclaimerAccepted: true,
+        },
+        responses: created("Onboarding complete; plan returned"),
+        errs: [400, 401],
+      }),
     },
     "/api/users/me/ai-plan": {
-      post: {
-        tags: ["Users"],
-        summary: "Generate free-tier AI plan (stub)",
-        security: [{ bearerAuth: [] }],
-        responses: { 201: { description: "Plan generated" } },
-      },
+      post: op({ tag: "Users", summary: "Regenerate AI plan (fallback path)", auth: true, responses: created(), errs: [400, 401] }),
     },
-    "/api/coaches/public": {
-      get: {
-        tags: ["Coaches"],
-        summary: "List approved coaches",
-        responses: {
-          200: {
-            description: "Coach list",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    coaches: {
-                      type: "array",
-                      items: { $ref: "#/components/schemas/CoachProfile" },
-                    },
-                  },
-                },
-              },
-            },
-          },
+
+    "/api/plans/me": { get: op({ tag: "Plans", summary: "My active plan (AI or coach)", auth: true, errs: [401] }) },
+    "/api/plans/coach": {
+      post: op({
+        tag: "Plans",
+        summary: "Coach assigns/replaces a subscriber's plan",
+        auth: true,
+        example: {
+          userId: "<userId>",
+          workout: { weeklySchedule: [{ dayOfWeek: "Mon", focus: "Lower body", rest: false, items: [{ trackedKey: "bodyweight_squat", sets: 4, reps: "8-12", restSeconds: 90, intensity: "RPE 7" }] }], notes: "" },
+          nutrition: { dailyCalories: 2400, protein_g: 160, carbs_g: 250, fat_g: 70, mealStructure: [] },
+          notes: "",
         },
-      },
+        responses: created(),
+        errs: [400, 401, 403],
+      }),
     },
-    "/api/coaches/applications": {
-      post: {
-        tags: ["Coaches"],
-        summary: "Apply to become coach (user role)",
-        security: [{ bearerAuth: [] }],
-        requestBody: {
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  bio: {
-                    type: "string",
-                    maxLength: 500,
-                    example: "Certified personal trainer with 5 years experience.",
-                  },
-                  specialties: {
-                    type: "array",
-                    items: { type: "string" },
-                    example: ["Weight Loss", "HIIT", "Nutrition"],
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: { 201: { description: "Application submitted" } },
-      },
-      get: { tags: ["Coaches"], summary: "List pending coach applications (admin)", security: [{ bearerAuth: [] }], responses: { 200: { description: "Pending applications" } } },
+    "/api/plans/{id}": {
+      patch: op({ tag: "Plans", summary: "Coach updates a plan they authored", auth: true, params: [p("id", "Plan id")], example: { notes: "Increased squat volume" }, errs: [400, 401, 403, 404] }),
     },
-    "/api/coaches/applications/{id}/decision": {
-      patch: {
-        tags: ["Coaches"],
-        summary: "Approve/reject coach application (admin)",
-        security: [{ bearerAuth: [] }],
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        responses: { 200: { description: "Decision recorded" } },
-      },
-    },
-    "/api/coaches/me/profile": {
-      patch: {
-        tags: ["Coaches"],
-        summary: "Update coach bio and specialties (trainer role)",
-        security: [{ bearerAuth: [] }],
-        requestBody: {
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  bio: { type: "string", maxLength: 500 },
-                  specialties: { type: "array", items: { type: "string" } },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          200: { description: "Profile updated" },
-          401: { description: "Unauthorized" },
-          403: { description: "Forbidden - trainer role required" },
-          404: { description: "No approved coach profile found" },
-        },
-      },
-    },
-    "/api/coaches/me/subscribers": {
-      get: {
-        tags: ["Coaches"],
-        summary: "List active subscribers for the authenticated coach (trainer role)",
-        security: [{ bearerAuth: [] }],
-        responses: {
-          200: { description: "Subscriber list" },
-          401: { description: "Unauthorized" },
-          403: { description: "Forbidden" },
-        },
-      },
-    },
-    "/api/coaches/{id}": {
-      get: {
-        tags: ["Coaches"],
-        summary: "Get public coach profile by ID",
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        responses: {
-          200: {
-            description: "Coach profile",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: { coach: { $ref: "#/components/schemas/CoachProfile" } },
-                },
-              },
-            },
-          },
-          404: { description: "Coach not found" },
-        },
-      },
-    },
-    "/api/subscriptions/me": {
-      get: { tags: ["Subscriptions"], summary: "Get my active subscription", security: [{ bearerAuth: [] }], responses: { 200: { description: "Subscription or null" } } },
-      delete: { tags: ["Subscriptions"], summary: "Cancel my active subscription", security: [{ bearerAuth: [] }], responses: { 200: { description: "Cancelled" } } },
-    },
-    "/api/subscriptions": {
-      post: {
-        tags: ["Subscriptions"],
-        summary: "Subscribe to one coach for one month",
-        security: [{ bearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["coachId"], properties: { coachId: { type: "string" } } } } } },
-        responses: { 201: { description: "Subscribed" }, 409: { description: "Already subscribed" } },
-      },
-    },
+
     "/api/exercises": {
-      get: { tags: ["Exercises"], summary: "List active exercises", parameters: [{ in: "query", name: "type", schema: { type: "string", enum: ["tracked", "guided"] } }], responses: { 200: { description: "Exercise list" } } },
-      post: { tags: ["Exercises"], summary: "Create exercise (admin)", security: [{ bearerAuth: [] }], responses: { 201: { description: "Exercise created" } } },
+      get: op({ tag: "Exercises", summary: "Catalog", params: [q("type", "tracked|guided"), q("category", "e.g. Legs")], errs: [] }),
+      post: op({ tag: "Exercises", summary: "Create (admin)", auth: true, example: { name: "Goblet Squat", type: "tracked", instructions: "...", trackedKey: "goblet_squat", supportedMistakes: ["knee_valgus"] }, responses: created(), errs: [400, 401, 403] }),
+    },
+    "/api/exercises/cv-config": {
+      get: op({ tag: "Exercises", summary: "On-device CV thresholds keyed by trackedKey", errs: [] }),
     },
     "/api/exercises/{id}": {
-      get: {
-        tags: ["Exercises"],
-        summary: "Get exercise by ID",
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        responses: { 200: { description: "Exercise" }, 404: { description: "Not found" } },
-      },
-      patch: {
-        tags: ["Exercises"],
-        summary: "Update exercise (admin)",
-        security: [{ bearerAuth: [] }],
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+      get: op({ tag: "Exercises", summary: "Get one", params: [p("id", "Exercise id")], errs: [404] }),
+      patch: op({ tag: "Exercises", summary: "Update (admin)", auth: true, params: [p("id", "Exercise id")], example: { isActive: false }, errs: [400, 401, 403, 404] }),
+    },
+
+    "/api/workouts/sessions": {
+      post: op({
+        tag: "Workouts",
+        summary: "Submit a completed session (raw events only)",
+        auth: true,
+        example: {
+          source: "device_cv", dayFocus: "Lower body",
+          startedAt: "2026-06-20T17:00:00Z", endedAt: "2026-06-20T17:30:00Z",
+          efforts: [{ trackedKey: "bodyweight_squat", setsCompleted: 3, totalReps: 20, correctReps: 15, wrongReps: 5, mistakes: [{ categoryKey: "knee_valgus", count: 3 }] }],
+        },
+        responses: created("Session saved; summary + optional riskAlert returned"),
+        errs: [400, 401, 404],
+      }),
+      get: op({ tag: "Workouts", summary: "Session history", auth: true, params: [q("page", "", { type: "integer" }), q("limit", "", { type: "integer" }), q("from", "ISO date"), q("to", "ISO date")], errs: [401] }),
+    },
+    "/api/workouts/sessions/{id}": {
+      get: op({ tag: "Workouts", summary: "Get one session", auth: true, params: [p("id", "Session id")], errs: [401, 403, 404] }),
+    },
+
+    "/api/progress/summary": { get: op({ tag: "Progress", summary: "Overall stats across all sessions", auth: true, params: [q("from", "ISO"), q("to", "ISO")], errs: [401] }) },
+    "/api/progress/risk": { get: op({ tag: "Progress", summary: "Injury-risk profile (or insufficient_data)", auth: true, errs: [401] }) },
+    "/api/progress/trends": { get: op({ tag: "Progress", summary: "Risk/accuracy time series", auth: true, params: [q("metric", "risk|accuracy"), q("days", "default 45", { type: "integer" })], errs: [401] }) },
+
+    "/api/coaches": { get: op({ tag: "Coaches", summary: "Public directory", params: [q("specialty", ""), q("page", "", { type: "integer" })], errs: [] }) },
+    "/api/coaches/applications": {
+      post: op({ tag: "Coaches", summary: "Apply to become a coach", auth: true, example: { bio: "...", specialties: ["Strength"], yearsExperience: 5, governmentIdMediaId: "<mediaId>", certificationMediaIds: ["<mediaId>"] }, responses: created(), errs: [400, 401, 409] }),
+    },
+    "/api/coaches/me/profile": {
+      get: op({ tag: "Coaches", summary: "My coach profile", auth: true, errs: [401, 404] }),
+      patch: op({ tag: "Coaches", summary: "Update my coach profile", auth: true, example: { bio: "...", specialties: ["Rehab"], areasOfExpertise: ["Knee rehab"] }, errs: [400, 401, 404] }),
+    },
+    "/api/coaches/me/subscribers": { get: op({ tag: "Coaches", summary: "My active subscribers", auth: true, errs: [401] }) },
+    "/api/coaches/me/subscribers/{userId}/progress": { get: op({ tag: "Coaches", summary: "A subscriber's progress + risk (read-only)", auth: true, params: [p("userId", "Subscriber id")], errs: [401, 403] }) },
+    "/api/coaches/me/transformations": { post: op({ tag: "Coaches", summary: "Add a transformation showcase", auth: true, example: { title: "12-week cut", description: "...", beforeMediaId: "<id>", afterMediaId: "<id>", durationWeeks: 12 }, responses: created(), errs: [400, 401] }) },
+    "/api/coaches/{id}": { get: op({ tag: "Coaches", summary: "Public coach profile", params: [p("id", "Coach id")], errs: [404] }) },
+    "/api/coaches/{id}/reviews": {
+      get: op({ tag: "Coaches", summary: "Coach reviews", params: [p("id", "Coach id")], errs: [] }),
+      post: op({ tag: "Coaches", summary: "Review a coach (subscription derived by backend)", auth: true, params: [p("id", "Coach id")], example: { rating: 5, comment: "Great coach" }, responses: created(), errs: [400, 401, 403, 409] }),
+    },
+    "/api/coaches/{id}/transformations": { get: op({ tag: "Coaches", summary: "Coach transformations", params: [p("id", "Coach id")], errs: [] }) },
+
+    "/api/subscriptions/me": {
+      get: op({ tag: "Subscriptions", summary: "My active subscription", auth: true, errs: [401] }),
+      delete: op({ tag: "Subscriptions", summary: "Cancel (stays active until period end)", auth: true, errs: [401, 404] }),
+    },
+    "/api/subscriptions": {
+      post: op({ tag: "Subscriptions", summary: "Subscribe to a coach (creates mock Payment)", auth: true, example: { coachId: "<coachId>" }, responses: created(), errs: [400, 401, 404, 409] }),
+    },
+
+    "/api/notifications": { get: op({ tag: "Notifications", summary: "My notifications", auth: true, params: [q("unread", "true|false"), q("page", "", { type: "integer" })], errs: [401] }) },
+    "/api/notifications/read-all": { patch: op({ tag: "Notifications", summary: "Mark all read", auth: true, errs: [401] }) },
+    "/api/notifications/{id}/read": { patch: op({ tag: "Notifications", summary: "Mark one read", auth: true, params: [p("id", "Notification id")], errs: [401, 404] }) },
+
+    "/api/media": {
+      post: {
+        tags: ["Media"],
+        summary: "Upload media (multipart: file + kind)",
+        security: bearer,
         requestBody: {
+          required: true,
           content: {
-            "application/json": {
+            "multipart/form-data": {
               schema: {
                 type: "object",
                 properties: {
-                  name: { type: "string" },
-                  type: { type: "string", enum: ["tracked", "guided"] },
-                  instructions: { type: "string" },
-                  isActive: { type: "boolean" },
+                  file: { type: "string", format: "binary" },
+                  kind: { type: "string", enum: ["profile_image", "coach_id_doc", "certification", "transformation_before", "transformation_after", "exercise_demo"] },
                 },
               },
             },
           },
         },
-        responses: {
-          200: { description: "Updated" },
-          401: { description: "Unauthorized" },
-          403: { description: "Forbidden" },
-          404: { description: "Not found" },
-        },
+        responses: { 201: { description: "Returns mediaId + url" }, 400: errors[400], 401: errors[401] },
       },
     },
-    "/api/workouts/me/plan": { get: { tags: ["Workouts"], summary: "Get my current active plan", security: [{ bearerAuth: [] }], responses: { 200: { description: "Plan or null" } } } },
-    "/api/workouts/coach/assignments": {
-      post: {
-        tags: ["Workouts"],
-        summary: "Coach assigns plan to subscribed user",
-        security: [{ bearerAuth: [] }],
-        requestBody: {
-          required: true,
-          content: { "application/json": { schema: { $ref: "#/components/schemas/AssignPlanBody" } } },
-        },
-        responses: { 201: { description: "Plan assigned" } },
-      },
+    "/api/media/{id}": {
+      get: op({ tag: "Media", summary: "Fetch media (private kinds require owner/admin)", params: [p("id", "Media id")], errs: [401, 403, 404] }),
     },
-    "/api/progress/sessions": { post: { tags: ["Progress"], summary: "Log workout session with tracked stats", security: [{ bearerAuth: [] }], responses: { 201: { description: "Session logged" } } } },
-    "/api/progress/sessions/{id}": {
-      get: {
-        tags: ["Progress"],
-        summary: "Get a single workout session by ID",
-        security: [{ bearerAuth: [] }],
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        responses: {
-          200: {
-            description: "Session detail",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: { session: { $ref: "#/components/schemas/WorkoutSessionDetail" } },
-                },
-              },
-            },
-          },
-          401: { description: "Unauthorized" },
-          403: { description: "Forbidden - not your session" },
-          404: { description: "Session not found" },
-        },
-      },
-    },
-    "/api/progress/me": {
-      get: {
-        tags: ["Progress"],
-        summary: "Get progress summary and recent sessions",
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          { in: "query", name: "page", schema: { type: "integer", default: 1 } },
-          { in: "query", name: "limit", schema: { type: "integer", default: 20 } },
-          {
-            in: "query",
-            name: "from",
-            schema: { type: "string", format: "date" },
-            description: "ISO date string, e.g. 2025-01-01",
-          },
-          {
-            in: "query",
-            name: "to",
-            schema: { type: "string", format: "date" },
-            description: "ISO date string, e.g. 2025-12-31",
-          },
-        ],
-        responses: { 200: { description: "Progress data" } },
-      },
-    },
-    "/api/admin/dashboard": {
-      get: {
-        tags: ["Admin"],
-        summary: "Admin metrics overview",
-        security: [{ bearerAuth: [] }],
-        responses: { 200: { description: "Metrics" }, 403: { description: "Forbidden" } },
-      },
-    },
-    "/api/admin/users": {
-      get: {
-        tags: ["Admin"],
-        summary: "Get all users (paginated)",
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          { in: "query", name: "page", schema: { type: "integer", minimum: 1, default: 1 } },
-          { in: "query", name: "limit", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
-          { in: "query", name: "role", schema: { type: "string", enum: ["user", "coach", "admin"] } },
-          { in: "query", name: "search", schema: { type: "string" } },
-        ],
-        responses: { 200: { description: "Users list" }, 403: { description: "Forbidden" } },
-      },
-    },
-    "/api/admin/users/{id}": {
-      get: {
-        tags: ["Admin"],
-        summary: "Get user by id",
-        security: [{ bearerAuth: [] }],
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        responses: { 200: { description: "User" }, 404: { description: "Not found" } },
-      },
-    },
-    "/api/admin/users/{id}/role": {
-      patch: {
-        tags: ["Admin"],
-        summary: "Change user role",
-        security: [{ bearerAuth: [] }],
-        parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/AdminUserRoleUpdateBody" } },
-          },
-        },
-        responses: { 200: { description: "Updated" }, 404: { description: "Not found" } },
-      },
+
+    "/api/admin/dashboard": { get: op({ tag: "Admin", summary: "Platform metrics", auth: true, errs: [401, 403] }) },
+    "/api/admin/users": { get: op({ tag: "Admin", summary: "List users", auth: true, params: [q("role", "user|coach|admin"), q("search", ""), q("page", "", { type: "integer" })], errs: [401, 403] }) },
+    "/api/admin/users/{id}": { get: op({ tag: "Admin", summary: "Get user", auth: true, params: [p("id", "User id")], errs: [401, 403, 404] }) },
+    "/api/admin/users/{id}/role": { patch: op({ tag: "Admin", summary: "Change a user's role", auth: true, params: [p("id", "User id")], example: { role: "coach" }, errs: [400, 401, 403, 404] }) },
+    "/api/admin/coach-applications": { get: op({ tag: "Admin", summary: "Review queue", auth: true, params: [q("status", "pending|approved|rejected")], errs: [401, 403] }) },
+    "/api/admin/coach-applications/{id}": { patch: op({ tag: "Admin", summary: "Approve/reject (creates CoachProfile on approve)", auth: true, params: [p("id", "Application id")], example: { decision: "approved", note: "" }, errs: [400, 401, 403, 404] }) },
+    "/api/admin/mistake-categories": {
+      get: op({ tag: "Admin", summary: "List mistake taxonomy", auth: true, errs: [401, 403] }),
+      post: op({ tag: "Admin", summary: "Upsert a mistake category", auth: true, example: { key: "knee_valgus", label: "Knees collapsing inward", appliesTo: ["bodyweight_squat"], bodyRegion: "Knee", severityWeight: 4, correctiveCue: "Push your knees out" }, errs: [400, 401, 403] }),
     },
   },
 };

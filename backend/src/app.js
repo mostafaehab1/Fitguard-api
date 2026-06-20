@@ -6,6 +6,7 @@ import swaggerUi from "swagger-ui-express";
 import apiRoutes from "./routes/index.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { openApiSpec } from "./openapi.js";
+import { env } from "./config.js";
 
 export function createApp() {
   const app = express();
@@ -15,7 +16,10 @@ export function createApp() {
       contentSecurityPolicy: false,
     })
   );
-  app.use(cors());
+  const corsOrigins = env.corsOrigins
+    ? env.corsOrigins.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
+  app.use(cors(corsOrigins ? { origin: corsOrigins, credentials: true } : {}));
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("dev"));
 

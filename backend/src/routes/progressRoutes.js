@@ -4,8 +4,8 @@ import * as progress from "../controllers/progressController.js";
 
 const router = Router();
 
-router.post("/sessions", authMiddleware, progress.createWorkoutSession);
-router.get("/sessions/:id", authMiddleware, progress.getSessionById);
-router.get("/me", authMiddleware, progress.getMyProgress);
+router.get("/summary", authMiddleware, progress.getSummary);
+router.get("/risk", authMiddleware, progress.getRisk);
+router.get("/trends", authMiddleware, progress.getTrends);
 
 export default router;
