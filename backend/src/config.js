@@ -83,12 +83,23 @@ function validateMailConfig(nodeEnv) {
 const nodeEnv = process.env.NODE_ENV ?? "development";
 validateMailConfig(nodeEnv);
 
+// Stateless AI plan-generation service (docs/04 §4.4). All optional — when unset,
+// the backend uses its deterministic fallback generator.
+const aiService = {
+  url: optional("AI_SERVICE_URL"),
+  key: optional("AI_SERVICE_KEY"),
+  timeoutMs: optionalNumber("AI_SERVICE_TIMEOUT_MS", 8000),
+};
+
 export const env = {
   nodeEnv,
   port,
   mongoUri: required("MONGODB_URI"),
   jwtSecret: required("JWT_SECRET"),
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
+  jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? "15m",
+  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? "30d",
+  corsOrigins: optional("CORS_ORIGINS"),
   appBaseUrl,
   mail,
+  aiService,
 };

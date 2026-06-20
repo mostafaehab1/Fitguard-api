@@ -1,97 +1,104 @@
-import { Exercise } from "../models/Exercise.js";
+import mongoose from "mongoose";
 import { WorkoutSession } from "../models/WorkoutSession.js";
-import { AppError } from "../middlewares/errorHandler.js";
+import { InjuryRiskProfile } from "../models/InjuryRiskProfile.js";
+import { InjuryRiskSnapshot } from "../models/InjuryRiskSnapshot.js";
+import { riskConfig } from "../config/riskConfig.js";
 
-export async function createWorkoutSession(req, res, next) {
+// GET /progress/summary — aggregates over ALL sessions (overall, not per page).
+export async function getSummary(req, res, next) {
   try {
-    const { exerciseId, totalReps, correctReps, wrongReps, mistakes } = req.body ?? {};
-    if (!exerciseId) {
-      throw new AppError("exerciseId is required", { code: "VALIDATION_ERROR" });
-    }
+    const userId = new mongoose.Types.ObjectId(req.auth.userId);
+    const match = { userId };
+    if (req.query.from) match.endedAt = { $gte: new Date(req.query.from) };
+    if (req.query.to) match.endedAt = { ...(match.endedAt ?? {}), $lte: new Date(req.query.to) };
 
-    const exercise = await Exercise.findById(exerciseId);
-    if (!exercise) {
-      throw new AppError("Exercise not found", { statusCode: 404, code: "NOT_FOUND" });
-    }
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
 
-    if ((Number(correctReps) || 0) + (Number(wrongReps) || 0) !== Number(totalReps)) {
-      throw new AppError("correctReps + wrongReps must equal totalReps", {
-        code: "VALIDATION_ERROR",
-      });
-    }
-
-    const session = await WorkoutSession.create({
-      userId: req.auth.userId,
-      exerciseId,
-      tracked: exercise.type === "tracked",
-      totalReps,
-      correctReps,
-      wrongReps,
-      mistakes: Array.isArray(mistakes) ? mistakes : [],
-      sessionAt: new Date(),
-    });
-
-    res.status(201).json({ session });
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function getMyProgress(req, res, next) {
-  try {
-    const page = Math.max(Number(req.query.page ?? 1), 1);
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 20), 1), 100);
-    const skip = (page - 1) * limit;
-
-    const filter = { userId: req.auth.userId };
-    if (req.query.from) filter.sessionAt = { $gte: new Date(req.query.from) };
-    if (req.query.to) filter.sessionAt = { ...(filter.sessionAt ?? {}), $lte: new Date(req.query.to) };
-
-    const [sessions, total] = await Promise.all([
-      WorkoutSession.find(filter)
-        .populate("exerciseId", "name type")
-        .sort({ sessionAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      WorkoutSession.countDocuments(filter),
+    const [totals, topMistakes, last7] = await Promise.all([
+      WorkoutSession.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalReps: { $sum: "$summary.totalReps" },
+            correctReps: { $sum: "$summary.correctReps" },
+            wrongReps: { $sum: "$summary.wrongReps" },
+            completedWorkouts: { $sum: 1 },
+          },
+        },
+      ]),
+      WorkoutSession.aggregate([
+        { $match: match },
+        { $unwind: "$summary.mistakeBreakdown" },
+        {
+          $group: {
+            _id: "$summary.mistakeBreakdown.categoryKey",
+            count: { $sum: "$summary.mistakeBreakdown.count" },
+          },
+        },
+        { $sort: { count: -1 } },
+        { $limit: 5 },
+      ]),
+      WorkoutSession.countDocuments({ ...match, endedAt: { $gte: sevenDaysAgo } }),
     ]);
 
-    const summary = sessions.reduce(
-      (acc, s) => {
-        acc.totalReps += s.totalReps;
-        acc.correctReps += s.correctReps;
-        acc.wrongReps += s.wrongReps;
-        return acc;
-      },
-      { totalReps: 0, correctReps: 0, wrongReps: 0 }
-    );
-    const accuracy =
-      summary.totalReps > 0 ? Number((summary.correctReps / summary.totalReps).toFixed(3)) : 0;
+    const t = totals[0] ?? { totalReps: 0, correctReps: 0, wrongReps: 0, completedWorkouts: 0 };
+    const accuracy = t.totalReps > 0 ? Number((t.correctReps / t.totalReps).toFixed(3)) : 0;
 
     res.json({
-      summary: { ...summary, accuracy },
-      sessions,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      summary: {
+        totalReps: t.totalReps,
+        correctReps: t.correctReps,
+        wrongReps: t.wrongReps,
+        accuracy,
+        completedWorkouts: t.completedWorkouts,
+        workoutsLast7Days: last7,
+        topMistakes: topMistakes.map((m) => ({ categoryKey: m._id, count: m.count })),
+      },
     });
   } catch (err) {
     next(err);
   }
 }
 
-export async function getSessionById(req, res, next) {
+// GET /progress/risk — current injury-risk profile (or insufficient_data).
+export async function getRisk(req, res, next) {
   try {
-    const { id } = req.params;
-    const session = await WorkoutSession.findById(id).populate(
-      "exerciseId",
-      "name type instructions"
-    );
-    if (!session) {
-      throw new AppError("Session not found", { statusCode: 404, code: "NOT_FOUND" });
+    const profile = await InjuryRiskProfile.findOne({ userId: req.auth.userId }).lean();
+    if (!profile || (profile.sessionsConsidered ?? 0) < riskConfig.minSessions) {
+      res.json({
+        status: "insufficient_data",
+        minSessions: riskConfig.minSessions,
+        sessionsConsidered: profile?.sessionsConsidered ?? 0,
+      });
+      return;
     }
-    if (String(session.userId) !== String(req.auth.userId)) {
-      throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
-    }
-    res.json({ session });
+    res.json({ status: "ok", risk: profile });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /progress/trends?metric=accuracy|risk&days=45 — time series for charts.
+export async function getTrends(req, res, next) {
+  try {
+    const metric = req.query.metric === "accuracy" ? "accuracy" : "risk";
+    const days = Math.min(Math.max(Number(req.query.days ?? 45), 1), 365);
+    const since = new Date(Date.now() - days * 86400000);
+
+    const snapshots = await InjuryRiskSnapshot.find({
+      userId: req.auth.userId,
+      takenAt: { $gte: since },
+    })
+      .sort({ takenAt: 1 })
+      .lean();
+
+    const series = snapshots.map((s) => ({
+      takenAt: s.takenAt,
+      value: metric === "accuracy" ? s.accuracy : s.overallScore,
+    }));
+
+    res.json({ metric, days, series });
   } catch (err) {
     next(err);
   }

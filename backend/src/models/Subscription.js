@@ -23,6 +23,7 @@ const subscriptionSchema = new mongoose.Schema(
       index: true,
     },
     cancelledAt: { type: Date, default: null },
+    expiryReminderSentAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

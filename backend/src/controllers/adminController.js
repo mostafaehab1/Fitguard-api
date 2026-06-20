@@ -1,15 +1,16 @@
-import { User, ROLES } from "../models/User.js";
+import { User, ROLES, BODY_REGIONS } from "../models/User.js";
 import { CoachApplication } from "../models/CoachApplication.js";
 import { Subscription } from "../models/Subscription.js";
 import { Exercise } from "../models/Exercise.js";
 import { WorkoutSession } from "../models/WorkoutSession.js";
+import { MistakeCategory } from "../models/MistakeCategory.js";
 import { AppError } from "../middlewares/errorHandler.js";
 
 function toPublicUser(user) {
   return {
     id: user.id,
     email: user.email,
-    role: user.role === "trainer" ? "coach" : user.role,
+    role: user.role,
     profile: user.profile,
     createdAt: user.createdAt,
   };
@@ -20,7 +21,7 @@ export async function getDashboard(req, res, next) {
     const [users, coaches, activeSubscriptions, pendingCoachApplications, exercises, sessions] =
       await Promise.all([
         User.countDocuments({}),
-        User.countDocuments({ role: "trainer" }),
+        User.countDocuments({ role: "coach" }),
         Subscription.countDocuments({ status: "active", endDate: { $gt: new Date() } }),
         CoachApplication.countDocuments({ status: "pending" }),
         Exercise.countDocuments({ isActive: true }),
@@ -52,11 +53,10 @@ export async function listUsers(req, res, next) {
 
     const query = {};
     if (role) {
-      const internalRole = role === "coach" ? "trainer" : role;
-      if (!ROLES.includes(internalRole)) {
+      if (!ROLES.includes(role)) {
         throw new AppError("Invalid role filter", { code: "VALIDATION_ERROR" });
       }
-      query.role = internalRole;
+      query.role = role;
     }
     if (search) {
       query.email = { $regex: search, $options: "i" };
@@ -92,15 +92,7 @@ export async function updateUserRole(req, res, next) {
   try {
     const { role } = req.body ?? {};
 
-    if (role === "trainer") {
-      throw new AppError("Use role 'coach' instead of 'trainer'", {
-        statusCode: 400,
-        code: "VALIDATION_ERROR",
-      });
-    }
-
-    const internalRole = role === "coach" ? "trainer" : role;
-    if (!ROLES.includes(internalRole)) {
+    if (!ROLES.includes(role)) {
       throw new AppError("role must be one of: user, coach, admin", {
         code: "VALIDATION_ERROR",
       });
@@ -115,9 +107,58 @@ export async function updateUserRole(req, res, next) {
         code: "SELF_ROLE_CHANGE",
       });
     }
-    user.role = internalRole;
+    user.role = role;
     await user.save();
     res.json({ user: toPublicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /admin/mistake-categories
+export async function listMistakeCategories(req, res, next) {
+  try {
+    const categories = await MistakeCategory.find({}).sort({ key: 1 });
+    res.json({ categories });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// POST /admin/mistake-categories — upsert by key (create or update).
+export async function upsertMistakeCategory(req, res, next) {
+  try {
+    const { key, label, appliesTo, bodyRegion, severityWeight, correctiveCue, isActive } =
+      req.body ?? {};
+    if (!key || !label || !bodyRegion || severityWeight == null) {
+      throw new AppError("key, label, bodyRegion and severityWeight are required", {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    if (!BODY_REGIONS.includes(bodyRegion)) {
+      throw new AppError(`bodyRegion must be one of: ${BODY_REGIONS.join(", ")}`, {
+        code: "VALIDATION_ERROR",
+      });
+    }
+    const sw = Number(severityWeight);
+    if (!Number.isFinite(sw) || sw < 1 || sw > 5) {
+      throw new AppError("severityWeight must be between 1 and 5", { code: "VALIDATION_ERROR" });
+    }
+    const category = await MistakeCategory.findOneAndUpdate(
+      { key: String(key).trim() },
+      {
+        $set: {
+          label: String(label).trim(),
+          appliesTo: Array.isArray(appliesTo) ? appliesTo.map(String) : [],
+          bodyRegion,
+          severityWeight: sw,
+          correctiveCue: String(correctiveCue ?? "").trim(),
+          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json({ category });
   } catch (err) {
     next(err);
   }
