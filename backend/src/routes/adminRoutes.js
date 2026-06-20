@@ -12,6 +12,8 @@ router.get("/dashboard", admin.getDashboard);
 router.get("/users", admin.listUsers);
 router.get("/users/:id", admin.getUserById);
 router.patch("/users/:id/role", admin.updateUserRole);
+router.patch("/users/:id/status", admin.setUserStatus); // deactivate/reactivate
+router.delete("/users/:id", admin.deactivateUser); // soft-deactivate (ban)
 
 // Coach application review
 router.get("/coach-applications", coach.listApplications);

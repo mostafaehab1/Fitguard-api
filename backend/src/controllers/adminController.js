@@ -12,6 +12,7 @@ function toPublicUser(user) {
     email: user.email,
     role: user.role,
     profile: user.profile,
+    disabledAt: user.disabledAt ?? null,
     createdAt: user.createdAt,
   };
 }
@@ -110,6 +111,50 @@ export async function updateUserRole(req, res, next) {
     user.role = role;
     await user.save();
     res.json({ user: toPublicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// DELETE /admin/users/:id — soft-deactivate (ban).
+export async function deactivateUser(req, res, next) {
+  try {
+    if (String(req.params.id) === String(req.auth.userId)) {
+      throw new AppError("You cannot deactivate your own account", {
+        statusCode: 400,
+        code: "SELF_DEACTIVATION",
+      });
+    }
+    const user = await User.findById(req.params.id);
+    if (!user) throw new AppError("User not found", { statusCode: 404, code: "NOT_FOUND" });
+    user.disabledAt = new Date();
+    user.refreshTokenHash = null;
+    await user.save();
+    res.json({ user: toPublicUser(user), disabled: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /admin/users/:id/status { disabled } — deactivate or reactivate.
+export async function setUserStatus(req, res, next) {
+  try {
+    const { disabled } = req.body ?? {};
+    if (typeof disabled !== "boolean") {
+      throw new AppError("disabled (boolean) is required", { code: "VALIDATION_ERROR" });
+    }
+    if (disabled && String(req.params.id) === String(req.auth.userId)) {
+      throw new AppError("You cannot deactivate your own account", {
+        statusCode: 400,
+        code: "SELF_DEACTIVATION",
+      });
+    }
+    const user = await User.findById(req.params.id);
+    if (!user) throw new AppError("User not found", { statusCode: 404, code: "NOT_FOUND" });
+    user.disabledAt = disabled ? new Date() : null;
+    if (disabled) user.refreshTokenHash = null;
+    await user.save();
+    res.json({ user: toPublicUser(user), disabled });
   } catch (err) {
     next(err);
   }

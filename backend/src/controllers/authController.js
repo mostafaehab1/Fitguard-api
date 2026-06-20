@@ -224,6 +224,13 @@ export async function login(req, res, next) {
       });
     }
 
+    if (doc.disabledAt) {
+      throw new AppError("This account has been deactivated.", {
+        statusCode: 403,
+        code: "ACCOUNT_DISABLED",
+      });
+    }
+
     const accessToken = signAccessToken(doc);
     const refreshToken = signRefreshToken(doc);
     doc.refreshTokenHash = sha256(refreshToken);

@@ -85,3 +85,21 @@ export async function createReview(req, res, next) {
     next(err);
   }
 }
+
+// DELETE /coaches/:id/reviews/:reviewId — author or admin.
+export async function deleteReview(req, res, next) {
+  try {
+    const review = await Review.findById(req.params.reviewId);
+    if (!review) throw new AppError("Review not found", { statusCode: 404, code: "NOT_FOUND" });
+    const isOwner = String(review.userId) === String(req.auth.userId);
+    if (!isOwner && req.auth.role !== "admin") {
+      throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
+    }
+    const { coachId } = review;
+    await review.deleteOne();
+    await recomputeCoachRating(coachId);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}

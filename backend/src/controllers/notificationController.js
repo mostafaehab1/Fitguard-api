@@ -53,3 +53,24 @@ export async function markAllRead(req, res, next) {
     next(err);
   }
 }
+
+// DELETE /notifications/:id
+export async function deleteNotification(req, res, next) {
+  try {
+    const n = await Notification.findOneAndDelete({ _id: req.params.id, userId: req.auth.userId });
+    if (!n) throw new AppError("Notification not found", { statusCode: 404, code: "NOT_FOUND" });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// DELETE /notifications — clear all of mine
+export async function clearAll(req, res, next) {
+  try {
+    const { deletedCount } = await Notification.deleteMany({ userId: req.auth.userId });
+    res.json({ ok: true, deleted: deletedCount ?? 0 });
+  } catch (err) {
+    next(err);
+  }
+}

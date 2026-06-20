@@ -95,6 +95,7 @@ User {
   resetToken:               String,  // select:false
   resetTokenExpiresAt:      Date,    // select:false
   refreshTokenHash:         String,  // 🆕 select:false (ADR-009)
+  disabledAt:               Date,    // 🆕 soft-deactivation (ban / self-delete) — blocks login + tokens
 
   timestamps: true
 }
@@ -483,7 +484,8 @@ These are the concrete changes from what is in `backend/src/models` today:
    enum and remove the alias.
 2. **`User.profile`**: add `experienceLevel`, `daysPerWeek`, `limitations`,
    `User.disclaimerAcceptedAt`, `onboardingCompletedAt`, `activePlanId`,
-   `activeSubscriptionId`, `refreshTokenHash`, `emailVerificationTokenExpiresAt`.
+   `activeSubscriptionId`, `refreshTokenHash`, `emailVerificationTokenExpiresAt`,
+   `disabledAt`.
 3. **`PlanAssignment`**: replace `workoutPlan:[String]` / `nutritionPlan:[String]`
    with the structured `workout` / `nutrition` subdocuments + `version`,
    `generatedBy`. (No production data yet → safe to redefine.)

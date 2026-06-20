@@ -27,11 +27,13 @@ router.post(
   requireRole("coach"),
   transformations.createTransformation
 );
+router.delete("/me/transformations/:id", authMiddleware, transformations.deleteTransformation);
 
 // Public coach detail + reviews + transformations
 router.get("/:id", coach.getCoachById);
 router.get("/:id/reviews", reviews.listReviews);
 router.post("/:id/reviews", authMiddleware, reviews.createReview);
+router.delete("/:id/reviews/:reviewId", authMiddleware, reviews.deleteReview);
 router.get("/:id/transformations", transformations.listTransformations);
 
 export default router;

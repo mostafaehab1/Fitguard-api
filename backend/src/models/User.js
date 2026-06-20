@@ -86,6 +86,10 @@ const userSchema = new mongoose.Schema(
     resetToken: { type: String, default: null, select: false },
     resetTokenExpiresAt: { type: Date, default: null, select: false },
     refreshTokenHash: { type: String, default: null, select: false },
+
+    // Soft-deactivation (ban or self-delete): login + token auth are blocked while set,
+    // but the user's sessions/reviews are kept for integrity and audit.
+    disabledAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

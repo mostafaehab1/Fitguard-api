@@ -12,5 +12,6 @@ const router = Router();
 
 router.post("/", authMiddleware, upload.single("file"), media.uploadMedia);
 router.get("/:id", media.getMedia); // access control handled inside (private kinds)
+router.delete("/:id", authMiddleware, media.deleteMedia); // owner or admin
 
 export default router;

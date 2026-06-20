@@ -103,3 +103,23 @@ export async function getMedia(req, res, next) {
     next(err);
   }
 }
+
+// DELETE /media/:id — owner or admin; also removes the stored file.
+export async function deleteMedia(req, res, next) {
+  try {
+    const asset = await MediaAsset.findById(req.params.id);
+    if (!asset) throw new AppError("Media not found", { statusCode: 404, code: "NOT_FOUND" });
+    if (String(asset.ownerId) !== String(req.auth.userId) && req.auth.role !== "admin") {
+      throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
+    }
+    try {
+      fs.unlinkSync(path.join(UPLOAD_DIR, asset.publicId));
+    } catch {
+      /* file already gone */
+    }
+    await asset.deleteOne();
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}

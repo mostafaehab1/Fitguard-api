@@ -149,6 +149,9 @@ export const openApiSpec = {
     "/api/users/me/ai-plan": {
       post: op({ tag: "Users", summary: "Regenerate AI plan (fallback path)", auth: true, responses: created(), errs: [400, 401] }),
     },
+    "/api/users/me": {
+      delete: op({ tag: "Users", summary: "Delete my account (soft-deactivate)", auth: true, errs: [401] }),
+    },
 
     "/api/plans/me": { get: op({ tag: "Plans", summary: "My active plan (AI or coach)", auth: true, errs: [401] }) },
     "/api/plans/coach": {
@@ -216,11 +219,13 @@ export const openApiSpec = {
     "/api/coaches/me/subscribers": { get: op({ tag: "Coaches", summary: "My active subscribers", auth: true, errs: [401] }) },
     "/api/coaches/me/subscribers/{userId}/progress": { get: op({ tag: "Coaches", summary: "A subscriber's progress + risk (read-only)", auth: true, params: [p("userId", "Subscriber id")], errs: [401, 403] }) },
     "/api/coaches/me/transformations": { post: op({ tag: "Coaches", summary: "Add a transformation showcase", auth: true, example: { title: "12-week cut", description: "...", beforeMediaId: "<id>", afterMediaId: "<id>", durationWeeks: 12 }, responses: created(), errs: [400, 401] }) },
+    "/api/coaches/me/transformations/{id}": { delete: op({ tag: "Coaches", summary: "Delete a transformation (owner/admin)", auth: true, params: [p("id", "Transformation id")], errs: [401, 403, 404] }) },
     "/api/coaches/{id}": { get: op({ tag: "Coaches", summary: "Public coach profile", params: [p("id", "Coach id")], errs: [404] }) },
     "/api/coaches/{id}/reviews": {
       get: op({ tag: "Coaches", summary: "Coach reviews", params: [p("id", "Coach id")], errs: [] }),
       post: op({ tag: "Coaches", summary: "Review a coach (subscription derived by backend)", auth: true, params: [p("id", "Coach id")], example: { rating: 5, comment: "Great coach" }, responses: created(), errs: [400, 401, 403, 409] }),
     },
+    "/api/coaches/{id}/reviews/{reviewId}": { delete: op({ tag: "Coaches", summary: "Delete a review (author/admin)", auth: true, params: [p("id", "Coach id"), p("reviewId", "Review id")], errs: [401, 403, 404] }) },
     "/api/coaches/{id}/transformations": { get: op({ tag: "Coaches", summary: "Coach transformations", params: [p("id", "Coach id")], errs: [] }) },
 
     "/api/subscriptions/me": {
@@ -231,9 +236,13 @@ export const openApiSpec = {
       post: op({ tag: "Subscriptions", summary: "Subscribe to a coach (creates mock Payment)", auth: true, example: { coachId: "<coachId>" }, responses: created(), errs: [400, 401, 404, 409] }),
     },
 
-    "/api/notifications": { get: op({ tag: "Notifications", summary: "My notifications", auth: true, params: [q("unread", "true|false"), q("page", "", { type: "integer" })], errs: [401] }) },
+    "/api/notifications": {
+      get: op({ tag: "Notifications", summary: "My notifications", auth: true, params: [q("unread", "true|false"), q("page", "", { type: "integer" })], errs: [401] }),
+      delete: op({ tag: "Notifications", summary: "Clear all my notifications", auth: true, errs: [401] }),
+    },
     "/api/notifications/read-all": { patch: op({ tag: "Notifications", summary: "Mark all read", auth: true, errs: [401] }) },
     "/api/notifications/{id}/read": { patch: op({ tag: "Notifications", summary: "Mark one read", auth: true, params: [p("id", "Notification id")], errs: [401, 404] }) },
+    "/api/notifications/{id}": { delete: op({ tag: "Notifications", summary: "Delete one notification", auth: true, params: [p("id", "Notification id")], errs: [401, 404] }) },
 
     "/api/media": {
       post: {
@@ -259,12 +268,17 @@ export const openApiSpec = {
     },
     "/api/media/{id}": {
       get: op({ tag: "Media", summary: "Fetch media (private kinds require owner/admin)", params: [p("id", "Media id")], errs: [401, 403, 404] }),
+      delete: op({ tag: "Media", summary: "Delete media (owner/admin) + remove stored file", auth: true, params: [p("id", "Media id")], errs: [401, 403, 404] }),
     },
 
     "/api/admin/dashboard": { get: op({ tag: "Admin", summary: "Platform metrics", auth: true, errs: [401, 403] }) },
     "/api/admin/users": { get: op({ tag: "Admin", summary: "List users", auth: true, params: [q("role", "user|coach|admin"), q("search", ""), q("page", "", { type: "integer" })], errs: [401, 403] }) },
-    "/api/admin/users/{id}": { get: op({ tag: "Admin", summary: "Get user", auth: true, params: [p("id", "User id")], errs: [401, 403, 404] }) },
+    "/api/admin/users/{id}": {
+      get: op({ tag: "Admin", summary: "Get user", auth: true, params: [p("id", "User id")], errs: [401, 403, 404] }),
+      delete: op({ tag: "Admin", summary: "Deactivate (ban) a user", auth: true, params: [p("id", "User id")], errs: [400, 401, 403, 404] }),
+    },
     "/api/admin/users/{id}/role": { patch: op({ tag: "Admin", summary: "Change a user's role", auth: true, params: [p("id", "User id")], example: { role: "coach" }, errs: [400, 401, 403, 404] }) },
+    "/api/admin/users/{id}/status": { patch: op({ tag: "Admin", summary: "Deactivate/reactivate a user", auth: true, params: [p("id", "User id")], example: { disabled: false }, errs: [400, 401, 403, 404] }) },
     "/api/admin/coach-applications": { get: op({ tag: "Admin", summary: "Review queue", auth: true, params: [q("status", "pending|approved|rejected")], errs: [401, 403] }) },
     "/api/admin/coach-applications/{id}": { patch: op({ tag: "Admin", summary: "Approve/reject (creates CoachProfile on approve)", auth: true, params: [p("id", "Application id")], example: { decision: "approved", note: "" }, errs: [400, 401, 403, 404] }) },
     "/api/admin/mistake-categories": {

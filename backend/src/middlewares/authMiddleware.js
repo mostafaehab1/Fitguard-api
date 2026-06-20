@@ -33,6 +33,9 @@ export async function authMiddleware(req, res, next) {
     if (!user) {
       throw new AppError("User not found", { statusCode: 401, code: "UNAUTHORIZED" });
     }
+    if (user.disabledAt) {
+      throw new AppError("Account deactivated", { statusCode: 403, code: "ACCOUNT_DISABLED" });
+    }
 
     req.auth = { userId: user.id, role: user.role };
     next();

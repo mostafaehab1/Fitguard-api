@@ -218,3 +218,24 @@ readable by the **owner or an admin** — never a public URL. Public kinds (`pro
 | `POST /progress/sessions` | `POST /workouts/sessions` | A2 |
 | `GET /progress/me` | `GET /progress/summary` (+fix overall) | B1 bug |
 | login returns `token` | returns `accessToken`+`refreshToken` | ADR-009 |
+
+## 3.16 Deletion & deactivation
+
+FitGuard **does not hard-delete records that anchor others** — it soft-deactivates them
+(keeps audit trail + referential integrity). Hard delete is used only for self-contained
+records.
+
+| Resource | Method + path | Who | Behavior |
+|---|---|---|---|
+| **Own account** | `DELETE /users/me` | user | **soft** — sets `disabledAt`; login + tokens blocked afterward |
+| **User (admin)** | `DELETE /admin/users/:id` | admin | **soft** deactivate (ban); cannot ban self |
+| **User (admin)** | `PATCH /admin/users/:id/status` `{disabled}` | admin | deactivate **or** reactivate |
+| **Review** | `DELETE /coaches/:id/reviews/:reviewId` | author or admin | **hard**; recomputes coach rating |
+| **Transformation** | `DELETE /coaches/me/transformations/:id` | owner coach or admin | **hard** |
+| **Media** | `DELETE /media/:id` | owner or admin | **hard** + removes the stored file |
+| **Notification** | `DELETE /notifications/:id` · `DELETE /notifications` | owner | **hard** (one / clear all) |
+| **Exercise / MistakeCategory** | `PATCH … isActive:false` | admin | **soft** (kept for historical references) |
+
+A deactivated user (`disabledAt` set) is blocked at both **login** (`403 ACCOUNT_DISABLED`)
+and **token auth** (existing access tokens stop working), and their refresh token is
+cleared. Their sessions, reviews, and history are retained.

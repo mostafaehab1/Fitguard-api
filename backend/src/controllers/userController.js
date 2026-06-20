@@ -203,6 +203,19 @@ function normalizeOnboardingProfile(body) {
   };
 }
 
+// DELETE /users/me — self-deactivate (soft). Login + tokens are blocked afterward.
+export async function deleteMyAccount(req, res, next) {
+  try {
+    assertAuth(req);
+    await User.findByIdAndUpdate(req.auth.userId, {
+      $set: { disabledAt: new Date(), refreshTokenHash: null },
+    });
+    res.json({ ok: true, message: "Your account has been deactivated." });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // Onboarding: completes the profile (+disclaimer) and AUTO-generates the AI plan.
 export async function completeOnboarding(req, res, next) {
   try {

@@ -31,3 +31,18 @@ export async function createTransformation(req, res, next) {
     next(err);
   }
 }
+
+// DELETE /coaches/me/transformations/:id — owning coach or admin.
+export async function deleteTransformation(req, res, next) {
+  try {
+    const t = await Transformation.findById(req.params.id);
+    if (!t) throw new AppError("Transformation not found", { statusCode: 404, code: "NOT_FOUND" });
+    if (String(t.coachId) !== String(req.auth.userId) && req.auth.role !== "admin") {
+      throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
+    }
+    await t.deleteOne();
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
