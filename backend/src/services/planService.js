@@ -77,12 +77,16 @@ export async function generateAndActivateAiPlan(userId) {
   const byTrackedKey = new Map(
     exercises.filter((e) => e.trackedKey).map((e) => [e.trackedKey, e])
   );
-  const catalog = exercises.map((e) => ({
-    trackedKey: e.trackedKey,
-    name: e.name,
-    type: e.type,
-    muscleGroups: e.muscleGroups,
-  }));
+  // The AI service requires a non-null trackedKey, so only send tracked exercises.
+  // Guided exercises (no trackedKey) are excluded from AI-generated workouts.
+  const catalog = exercises
+    .filter((e) => e.trackedKey)
+    .map((e) => ({
+      trackedKey: e.trackedKey,
+      name: e.name,
+      type: e.type,
+      muscleGroups: e.muscleGroups,
+    }));
 
   const profilePayload = {
     age: p.age,
