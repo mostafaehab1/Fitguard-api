@@ -1,5 +1,6 @@
 // Scheduled lifecycle jobs (docs/06 §6.4). Idempotent.
 import cron from "node-cron";
+import { env } from "../config.js";
 import { Subscription } from "../models/Subscription.js";
 import { PlanAssignment } from "../models/PlanAssignment.js";
 import { User } from "../models/User.js";
@@ -68,5 +69,12 @@ export function startScheduler() {
   cron.schedule("0 9 * * *", () => {
     sendExpiryReminders().catch((e) => console.error("[job:expiryReminders]", e.message));
   });
+  // Keep the AI plan service warm while the backend is awake (free HF Spaces sleep
+  // when idle, causing a slow cold-start on the next plan request).
+  if (env.aiService?.url) {
+    cron.schedule("*/4 * * * *", () => {
+      fetch(`${env.aiService.url}/health`).catch(() => {});
+    });
+  }
   console.log("[scheduler] lifecycle jobs scheduled (expire hourly, reminders daily 09:00)");
 }
