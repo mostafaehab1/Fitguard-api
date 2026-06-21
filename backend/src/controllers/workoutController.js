@@ -42,9 +42,11 @@ export async function submitSession(req, res, next) {
       const mistakes = [];
 
       if (tracked) {
-        totalReps = Number(e.totalReps) || 0;
         correctReps = Number(e.correctReps) || 0;
         wrongReps = Number(e.wrongReps) || 0;
+        // totalReps is optional: defaults to correct+wrong so the on-device CV
+        // FormResult ({correctReps, wrongReps, mistakes}) submits as-is.
+        totalReps = e.totalReps != null ? Number(e.totalReps) : correctReps + wrongReps;
         if (correctReps + wrongReps !== totalReps) {
           throw new AppError("correctReps + wrongReps must equal totalReps", {
             code: "VALIDATION_ERROR",
