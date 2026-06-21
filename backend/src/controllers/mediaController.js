@@ -1,17 +1,8 @@
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import { MediaAsset, MEDIA_KINDS, PRIVATE_MEDIA_KINDS } from "../models/MediaAsset.js";
 import { env } from "../config.js";
 import { AppError } from "../middlewares/errorHandler.js";
-
-// Local-disk storage so media works without cloud keys. For production, swap this
-// service for Cloudinary/S3 at the same boundary (MediaAsset keeps only references).
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = path.join(__dirname, "../../uploads");
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+import { saveMedia, removeMedia, resolveUrl, localStream } from "../services/mediaStorage.js";
 
 const IMAGE_MIME = ["image/jpeg", "image/png", "image/webp"];
 const RULES = {
@@ -19,7 +10,6 @@ const RULES = {
   certification: { mimes: [...IMAGE_MIME, "application/pdf"], maxBytes: 10 * 1024 * 1024 },
   coach_id_doc: { mimes: [...IMAGE_MIME, "application/pdf"], maxBytes: 10 * 1024 * 1024 },
 };
-const EXT = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf" };
 
 function authFromHeader(req) {
   const header = req.headers.authorization;
@@ -53,22 +43,18 @@ export async function uploadMedia(req, res, next) {
       });
     }
 
-    const filename = `${crypto.randomBytes(16).toString("hex")}${EXT[req.file.mimetype] ?? ""}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, filename), req.file.buffer);
-
-    const isPrivate = PRIVATE_MEDIA_KINDS.includes(kind);
+    const stored = await saveMedia({ buffer: req.file.buffer, mime: req.file.mimetype, kind });
     const asset = await MediaAsset.create({
       ownerId: req.auth.userId,
       kind,
-      provider: "local",
-      publicId: filename,
+      provider: stored.provider,
+      publicId: stored.publicId,
       mime: req.file.mimetype,
       sizeBytes: req.file.size,
-      url: null,
+      url: stored.url,
     });
-    // Public kinds get a directly fetchable URL; private kinds are served only via the
-    // access-controlled GET /media/:id.
-    if (!isPrivate) {
+    // Public local assets are served back through this API; give them that URL.
+    if (!PRIVATE_MEDIA_KINDS.includes(kind) && stored.provider === "local") {
       asset.url = `${env.appBaseUrl}/api/media/${asset.id}`;
       await asset.save();
     }
@@ -93,18 +79,23 @@ export async function getMedia(req, res, next) {
       }
     }
 
-    const filePath = path.join(UPLOAD_DIR, asset.publicId);
-    if (!fs.existsSync(filePath)) {
-      throw new AppError("File missing", { statusCode: 404, code: "NOT_FOUND" });
+    if (asset.provider === "cloudinary") {
+      const url = PRIVATE_MEDIA_KINDS.includes(asset.kind) ? resolveUrl(asset) : asset.url;
+      if (!url) throw new AppError("Media not found", { statusCode: 404, code: "NOT_FOUND" });
+      res.redirect(url);
+      return;
     }
+
+    const stream = localStream(asset);
+    if (!stream) throw new AppError("File missing", { statusCode: 404, code: "NOT_FOUND" });
     res.type(asset.mime ?? "application/octet-stream");
-    fs.createReadStream(filePath).pipe(res);
+    stream.pipe(res);
   } catch (err) {
     next(err);
   }
 }
 
-// DELETE /media/:id — owner or admin; also removes the stored file.
+// DELETE /media/:id — owner or admin; also removes the stored file/object.
 export async function deleteMedia(req, res, next) {
   try {
     const asset = await MediaAsset.findById(req.params.id);
@@ -112,11 +103,7 @@ export async function deleteMedia(req, res, next) {
     if (String(asset.ownerId) !== String(req.auth.userId) && req.auth.role !== "admin") {
       throw new AppError("Forbidden", { statusCode: 403, code: "FORBIDDEN" });
     }
-    try {
-      fs.unlinkSync(path.join(UPLOAD_DIR, asset.publicId));
-    } catch {
-      /* file already gone */
-    }
+    await removeMedia(asset);
     await asset.deleteOne();
     res.json({ ok: true });
   } catch (err) {

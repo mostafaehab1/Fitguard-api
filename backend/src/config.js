@@ -91,6 +91,16 @@ const aiService = {
   timeoutMs: optionalNumber("AI_SERVICE_TIMEOUT_MS", 8000),
 };
 
+// Media storage. Uses Cloudinary when fully configured, else local disk.
+const media = {
+  provider: optional("MEDIA_PROVIDER", "local"),
+  cloudinary: {
+    cloudName: optional("CLOUDINARY_CLOUD_NAME"),
+    apiKey: optional("CLOUDINARY_API_KEY"),
+    apiSecret: optional("CLOUDINARY_API_SECRET"),
+  },
+};
+
 export const env = {
   nodeEnv,
   port,
@@ -102,4 +112,5 @@ export const env = {
   appBaseUrl,
   mail,
   aiService,
+  media,
 };
